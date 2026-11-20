@@ -42,7 +42,6 @@ export default defineConfig([
       'sync-slack': 'src/sync/slack.ts',
       'sync-github': 'src/sync/github.ts',
       'sync-linear': 'src/sync/linear.ts',
-      cli: 'src/cli/bin.ts',
       // `@vercel/board/cli`: the CLI for another one to embed, as `vercel board`, without `inspect`
       // or `serve`.
       'cli-embedded': 'src/cli/embedded.ts',
@@ -67,6 +66,20 @@ export default defineConfig([
     },
     plugins: [inspectorPage()],
     clean: true,
+  },
+  {
+    // The `vb` CLI, as one file with everything it imports inlined: starting a command then loads 1 module
+    // instead of ~390 (zod and jose alone are ~220), which is most of what a command used to spend
+    // before doing anything. Dynamic imports stay deferred: they're inlined as functions that run on first use.
+    entry: { cli: 'src/cli/bin.ts' },
+    format: 'esm',
+    platform: 'node',
+    target: 'node22',
+    dts: false,
+    deps: { alwaysBundle: [/.*/], onlyBundle: false },
+    outputOptions: { codeSplitting: false },
+    // It adds dist/cli.mjs to the build above rather than replacing it.
+    clean: false,
   },
 ])
 
