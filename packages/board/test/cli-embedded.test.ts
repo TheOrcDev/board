@@ -1068,6 +1068,8 @@ describe('the embedded CLI', () => {
       expect(said.stderr).toContain('The team has all the boards it can.')
       expect(said.stderr).toContain('    vb post general hi --scope test\n')
       expect(said.stderr).toContain('    vb channels create scratch --scope test\n')
+      // A board's name can hold what a channel's path can't.
+      expect((await run('post', 'general', 'hi', '--scope', 'test', '--name', 'My Board', '--ensure')).stderr).toContain('    vb channels create my-board --scope test\n')
     } finally {
       fetching.mockRestore()
       process.chdir(cwd)

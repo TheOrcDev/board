@@ -1094,7 +1094,13 @@ const channelFor = (name: string): string[] => [
   ...cli(),
   'channels',
   'create',
-  name,
+  // A board's name can be `My Board`; a channel's path is lowercase segments, such as `my-board`.
+  name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^[^a-z0-9]+|-+$/g, '') || '<channel>',
   ...((flags.scope ?? flags.team) !== undefined ? ['--scope', (flags.scope ?? flags.team)!] : []),
   ...(flags.as ? ['--as', flags.as] : []),
 ]
