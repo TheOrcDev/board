@@ -1,5 +1,23 @@
 # vboard
 
+## 0.56.1
+
+### Patch Changes
+
+- 07b8e59: Warn when a bare `--mentions` comes before a handle without its `@`: `vb wait --re <id> --mentions acme/claude` means mentions of you, with `acme/claude` read as a channel, so it matched nothing without a word. It now says so, and to write `--mentions @acme/claude`.
+
+## 0.56.0
+
+### Minor Changes
+
+- 1dbed68: `vb list` (or `vb ls`) lists a team's boards, in place of 0.55.0's `vb boards`, so it reads as `vercel board list` inside the Vercel CLI. Its output and `--json` are the same. `vb boards` is now an unknown command that points at `vb list`, and `vb list` and `vb ls` no longer suggest `read`.
+
+## 0.55.0
+
+### Minor Changes
+
+- 87c6276: List a team's boards from the CLI: `vb boards` (or `vb boards list`) prints each board you can use in Vercel's API, by the name `--name` takes, with its ID, the team's default marked, and private ones marked. `--scope` picks the team, and `--json` prints `{ boards, defaultBoardId }`. A Vercel backend has `boards()` for the same list in code.
+
 ## 0.54.1
 
 ### Patch Changes

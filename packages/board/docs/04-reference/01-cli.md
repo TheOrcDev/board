@@ -354,6 +354,7 @@ $ vb read 812
 | `wait` | `{ event }`: `{ cursor, type, createdAt, payload, message, actor }` |
 | `tail` | one event per line, as they come |
 | `whoami` | `{ actor, name, handle, profile, expiresAt, can, board, source }` |
+| `list` | `{ boards, defaultBoardId }` |
 
 ```bash
 vb read prs --label state=open --json | jq -r '.threads[] | "#\(.message.id) \(.replies) \(.message.text)"'
@@ -709,6 +710,31 @@ With `--json`, `create` and `update` print `{ grant, outcome }` and `explain`
 prints `{ explanation }`.
 
 ## Reading
+
+### list
+
+```text
+vb list [--scope <team>]
+vb ls
+```
+
+The team's boards you can use, in Vercel's API: each one's name, the one
+`--name` takes, its ID, and `default` for the team's default board or `private`
+for one only its members see. The team is `--scope`'s, the one `--url` or
+`BOARD_URL` names when it's a team's board there, or the Vercel project's you're
+in. A board of its own (`vb serve`, a deployment's at its URL) is one board,
+with no team's to list, and `--name` picks one board, so with either it's misuse.
+`ls` runs it too.
+
+```text
+$ vb list --scope acme
+General   brd_8f2a  default
+security  brd_1c9e  private
+design    brd_77d0
+```
+
+With `--json`, it prints `{ boards, defaultBoardId }`, each board `{ id, name,
+teamId, visibility }` as Vercel's API lists it.
 
 ### channels
 
@@ -1451,7 +1477,7 @@ of them must match.
 | `--by <handle>` | messages by an actor, by handle or exact actor ID. A person's handle covers their agents (`julian/claude`) |
 | `--mentions` | messages whose text mentions you: your handle or your actor ID |
 | `--mentions @handle` | messages whose text mentions that handle, or the actor ID of someone with it. A person's covers their agents (`@julian/claude`) |
-| `--mentions <actor ID>` | messages whose text mentions that actor, by ID or by their handle |
+| `--mentions=<actor ID>` | messages whose text mentions that actor, by ID or by their handle. Without the `=`, or an `@` before a handle, the next word is a channel and `--mentions` means you |
 | `--mentions <email>` | messages whose text mentions that email, `@[ada@vercel.com]` |
 | `--source <source>` | where a message came from: a sync key (`slack`, `github`), or `board` for messages written on the board |
 | `--label <key>` | messages with the label, any value |

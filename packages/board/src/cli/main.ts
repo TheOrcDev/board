@@ -4,7 +4,7 @@ import { basename } from 'node:path'
 import { parseArgs } from 'node:util'
 import { CHANNELS_LIMIT_MAX, GRANT_BATCH_MAX, THREADS_LIMIT_DEFAULT, THREADS_LIMIT_MAX, type GrantInput, type Me, type MessageView } from '../api/routes.ts'
 import { everyChannel } from '../client/channels.ts'
-import { withMentions } from '../api/tail.ts'
+import { mentionValue, withMentions } from '../api/tail.ts'
 import { BoardError, type ClaimedTask, type Filters, type ProfileOption, type TaskInBatch, type Written } from '../client/client.ts'
 import type { Mentioned } from '../contract/mentions.ts'
 import { createTasksInChunks, TasksInChunksError } from '../client/chunks.ts'
@@ -244,6 +244,8 @@ let current: { command: string | undefined; args: string[] } = { command: undefi
 let typed: string[] = []
 /** What this run's writes had to say, for its JSON result. */
 let warnings: Warning[] = []
+/** The word a bare `--mentions` came before, when it isn't the command: a warning says how it reads. */
+let bareMentions: string | undefined
 /** The board this run reached by its URL, for a failure to name. */
 let reached: string | null = null
 /** The team whose default board this run reached, nothing naming one of its boards: `--scope`'s, or the one the environment finds. */
@@ -271,6 +273,19 @@ const named = () => (app.name === 'board' ? 'vb' : app.name)
 /** The commands that take their text as an argument, where text that starts with `-` goes after `--`. */
 const TEXT = new Set(['post', 'reply', 'edit', 'schedule'])
 
+/**
+ * The word a bare `--mentions` came before, when it isn't the command: `--mentions ada` means
+ * mentions of you, with `ada` a channel or ID, since only `me` or a word with an `@` is its value.
+ */
+function bareMentionsWord(argv: string[], word: string | undefined): string | undefined {
+  const end = argv.includes('--') ? argv.indexOf('--') : argv.length
+  for (let at = 0; at < end - 1; at++) {
+    const next = argv[at + 1]!
+    if (argv[at] === '--mentions' && !mentionValue(next) && !next.startsWith('-') && canonical(next) !== word) return next
+  }
+  return undefined
+}
+
 /** Parses `argv` for this run, or throws what's wrong with it. */
 function parse(argv: string[]) {
   const args = withMentions(argv)
@@ -286,6 +301,7 @@ function parse(argv: string[]) {
     )
     flags = parsed.values
     positionals = parsed.positionals.map((arg) => (arg.startsWith(MARK) ? arg.slice(MARK.length) : arg))
+    bareMentions = bareMentionsWord(argv, word)
   } catch (error) {
     throw parseFailure(error as Error & { code?: string }, argv, word)
   }
@@ -850,6 +866,8 @@ function doing(): string {
     case 'schedules':
     case 'actors':
       return `list ${command}`
+    case 'list':
+      return "list the team's boards"
     case 'tasks': {
       if (a === undefined || !TASK_VERBS.has(a)) return a === undefined ? 'list tasks' : `list tasks in ${a}`
       const one = b === undefined ? 'a task' : `task ${ref(b)}`
@@ -1155,10 +1173,10 @@ function unsupportedRecoveries(): Recovery[] {
 /** `42s`, `2m`: a wait the way people say it. */
 const waitFor = (seconds: number) => (seconds < 120 ? `${Math.max(1, seconds)}s` : `${Math.ceil(seconds / 60)}m`)
 
-/** How this run ends with `failure`: shown on stderr, or by the app, and its exit code. */
+/** How this run ends with `failure`: shown on stderr, or by the app, and its exit code. With `--json`, its document carries the run's warnings, which may say why it failed. */
 function report(failure: Failure, json: boolean): number {
   if (app.onError) app.onError(failure, { json })
-  else if (json) io.error(`${JSON.stringify(failureDocument(failure))}\n`)
+  else if (json) io.error(`${JSON.stringify(warnings.length ? { ...failureDocument(failure), warnings } : failureDocument(failure))}\n`)
   else io.error(`${terminalText(formatFailure(failure))}\n`)
   return exitCode(failure)
 }
@@ -1235,6 +1253,32 @@ function connection(url: string | undefined = flags.url, options: { token?: stri
   const board = boardAt({ backend: http(at, { fetch: transport.fetch }) })
   sent = transport.source
   return { url: at as string | null, transport: transport as { source(): string | null }, board: profile !== undefined ? board.as(profile) : board }
+}
+
+/**
+ * The team's boards, in Vercel's API: `--scope`'s team, the one `--url` or `BOARD_URL` names when
+ * it's a team's board there, or the one the environment finds. A board of its own (`vb serve`, a
+ * deployment's) is one board, with no team's to list.
+ */
+async function teamBoards() {
+  if (io.board) throw usage("list isn't available in-process: the board handle you pass is one board.", { reason: 'not_available', next: [] })
+  if (flags.name !== undefined || flags.ensure)
+    throw usage(`list lists every board of the team, and --${flags.name !== undefined ? 'name' : 'ensure'} picks one: leave it out.`, { reason: 'conflicting_options' })
+  let team = flags.scope ?? flags.team
+  if (team !== undefined && flags.url !== undefined)
+    throw usage("--url names its board, its team included, and --scope a team: pass one of them.", { reason: 'conflicting_options' })
+  const url = flags.url ?? (team === undefined ? configuredUrl() : null)
+  if (url !== null && url !== undefined) {
+    const onVercel = vercelBoard(url.replace(/\/+$/, ''))
+    if (!onVercel)
+      throw usage(`${url} is a board of its own, with no team's boards to list: list lists a team's, in Vercel's API.`, {
+        reason: 'not_available',
+        next: [{ instruction: "List a team's boards", argv: rerunWithout(['--url'], '--scope', '<TEAM>') }],
+      })
+    team = onVercel.team
+  }
+  sent = credentialSource
+  return vercel({ ...(team !== undefined ? { team } : {}), ...sending(undefined) }).boards()
 }
 
 /**
@@ -1492,6 +1536,19 @@ async function run(command: string | undefined, args: string[]): Promise<number>
       }
       // A page that isn't the last says how to read the next.
       if (listed.next !== null) out(`\n(more not shown: ${commandLine(rerunWithout(['--after'], '--after', listed.next))})`)
+      return 0
+    }
+
+    case 'list': {
+      if (args[0] !== undefined) throw usage(`list takes no arguments: ${args[0]} is one too many.`)
+      const listed = await teamBoards()
+      if (flags.json) return result(listed), 0
+      if (listed.boards.length === 0) return out('no boards you can use on this team yet'), 0
+      const width = Math.max(...listed.boards.map((board) => board.name.length))
+      for (const board of listed.boards) {
+        const notes = [...(board.id === listed.defaultBoardId ? ['default'] : []), ...(board.visibility === 'private' ? ['private'] : [])]
+        out(`${board.name.padEnd(width)}  ${board.id}${notes.length > 0 ? `  ${notes.join(', ')}` : ''}`.trimEnd())
+      }
       return 0
     }
 
@@ -2827,8 +2884,7 @@ const OTHER_NAMES: Record<string, OtherName> = {
   search: SEARCH,
   find: SEARCH,
   grep: SEARCH,
-  list: { instruction: "List a channel's threads with read", argv: ['read', '<CHANNEL>'] },
-  ls: { instruction: "List a channel's threads with read", argv: ['read', '<CHANNEL>'] },
+  boards: { instruction: "List the team's boards", argv: ['list'] },
   threads: { instruction: "List a channel's threads with read", argv: ['read', '<CHANNEL>'] },
   messages: { instruction: 'Read one thread, every message', argv: ['read', '<ID>'] },
   thread: { instruction: 'Read one thread, every message', argv: ['read', '<ID>'] },
@@ -2922,6 +2978,7 @@ async function runOnce(argv: string[], options: App): Promise<number> {
   flags = {} as Flags
   positionals = []
   warnings = []
+  bareMentions = undefined
   reached = null
   teamDefault = null
   sent = () => null
@@ -2942,6 +2999,11 @@ async function runOnce(argv: string[], options: App): Promise<number> {
     const [word, ...args] = positionals
     const command = canonical(word)
     current = { command, args }
+    if (bareMentions !== undefined)
+      warn({
+        reason: 'bare_mentions',
+        message: `--mentions ${bareMentions} means mentions of you, with ${bareMentions} as a channel or ID: for mentions of ${bareMentions}, write --mentions @${bareMentions}.`,
+      })
     if (io.board) {
       const given = flags.url ? 'url' : flags.name !== undefined ? 'name' : flags.ensure ? 'ensure' : null
       if (given) throw usage(`--${given} doesn't apply in-process: the board handle you pass says which board and who.`, { next: [] })
