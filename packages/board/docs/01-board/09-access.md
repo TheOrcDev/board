@@ -218,7 +218,9 @@ more specific pattern decides first.
   given. Each needs what it would alone, on the grants as they are, and what
   they leave you with is judged with all of them made. So a lock and the
   grant that keeps you in pass together, whichever comes first.
-  `vb grants create --file` makes the ones a JSON file holds.
+  `vb grants create --file` makes the ones a JSON file holds. Vercel's board
+  has no batch and answers 501 `not_supported`: make the grant that keeps you
+  in first, then the lock.
 - **Naming an `oidc` principal takes `manage` everywhere,** since the board
   then fetches its issuer's keys. Listing grants takes `manage` at `*`.
 - **Owners always may.** On Vercel's API, the team's owners. On a local board,

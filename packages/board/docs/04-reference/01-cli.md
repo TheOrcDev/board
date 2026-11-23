@@ -622,7 +622,8 @@ app's client ID.
 the file is a JSON array of grants, each `{ principals, can }` as
 [`createGrants`](./02-board.md#creategrant) takes them, and `-` reads it from
 stdin. A lock and the grant that keeps you in go together that way, in either
-order.
+order. Vercel's board makes grants one at a time and refuses `--file` with 501
+`not_supported`: make each with `create`, the grant that keeps you in first.
 
 `create` prints each grant it made as its row. `update` takes `--add-<kind>` and
 `--remove-<kind>` for each kind (`--add-user`, `--remove-project`,

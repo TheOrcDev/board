@@ -159,7 +159,8 @@ describe('vercel()', () => {
       'grants: lets no caller narrowed with x-board-can let anyone in where everyone gets more than it has': 'passed',
       // The run is a team owner, whom nothing locks out.
       "grants: refuses a grant its maker couldn't take back, unless it says lockMeOut": 'skipped',
-      'grants: makes several grants in one write, or none of them, a lock with the grant that keeps its maker in': 'passed',
+      // Vercel's API makes grants one at a time: it has no batch.
+      'grants: makes several grants in one write, or none of them, a lock with the grant that keeps its maker in': 'skipped',
       'grants: lets a member grant on a pattern after a lock under it': 'skipped',
       'grants: lets a project on another team in, in its environments': 'skipped',
       'schemas: lists the built-in schemas first, and reads a schema by its ID': 'passed',
@@ -2929,23 +2930,31 @@ describe('vercel()', () => {
     await expect(pong.createGrant({ principals: [{ kind: 'everyone' }], can: { 'dev/': [] } })).rejects.toMatchObject({ status: 403, code: 'grant_forbidden', message: expect.stringContaining('takes manage') })
   })
 
-  it("gives back a lockout Vercel's API refuses as the board's, and sends lockMeOut and a batch through to it", async () => {
+  it("gives back a lockout Vercel's API refuses as the board's, and sends lockMeOut through to it", async () => {
     const api = fakeMessageboard()
     await handleOn(api).createGrant({ principals: [{ kind: 'app', app: 'deploy' }], can: { '*': 'all' } })
     // An app is no team owner: what it manages, a grant can take from it.
     const app = handleOn(api, 'app:oac_2')
     const lock = { principals: [{ kind: 'everyone' }], can: { 'dev/': ['read'] } } as const
     await expect(app.createGrant(lock)).rejects.toMatchObject({ status: 409, code: 'grant_lockout', origin: 'board', message: expect.stringContaining('dev/') })
-    const { grants } = await app.createGrants([lock, { principals: [{ kind: 'app', app: 'deploy' }], can: { 'dev/': 'all' } }])
-    expect(grants.map((grant) => [grant.principals[0]?.kind, grant.can])).toEqual([
-      ['everyone', { 'dev/': ['read'] }],
-      ['app', { 'dev/': 'all' }],
-    ])
-    const [, keeps] = grants
-    await expect(app.revokeGrant(keeps!.id)).rejects.toMatchObject({ status: 409, code: 'grant_lockout' })
-    await expect(app.updateGrant(keeps!.id, { can: { 'dev/': ['read'] } })).rejects.toMatchObject({ status: 409, code: 'grant_lockout' })
-    expect(await app.revokeGrant(keeps!.id, { lockMeOut: true })).toEqual({ revoked: true })
+    const { grant: keeps } = await app.createGrant({ principals: [{ kind: 'app', app: 'deploy' }], can: { 'dev/': 'all' } })
+    await app.createGrant(lock)
+    await expect(app.revokeGrant(keeps.id)).rejects.toMatchObject({ status: 409, code: 'grant_lockout' })
+    await expect(app.updateGrant(keeps.id, { can: { 'dev/': ['read'] } })).rejects.toMatchObject({ status: 409, code: 'grant_lockout' })
+    expect(await app.revokeGrant(keeps.id, { lockMeOut: true })).toEqual({ revoked: true })
     await expect(app.createGrant({ principals: [{ kind: 'app', app: 'deploy' }], can: { 'dev/': 'all' } })).rejects.toMatchObject({ status: 403, code: 'grant_forbidden' })
+  })
+
+  it("refuses several grants in one write as not supported, since Vercel's API has no batch, and writes none of them", async () => {
+    const api = fakeMessageboard()
+    const jb = handleOn(api)
+    const before = await jb.grants()
+    await expect(jb.createGrants([{ principals: [{ kind: 'everyone' }], can: { 'dev/': ['read'] } }, { principals: [{ kind: 'app', app: 'deploy' }], can: { 'dev/': 'all' } }])).rejects.toMatchObject({
+      status: 501,
+      code: 'not_supported',
+      message: expect.stringContaining('vb grants create'),
+    })
+    expect(await jb.grants()).toEqual(before)
   })
 
   it("sends grants to Vercel's API as people name their principals, and gives back what it answers, IDs and names", async () => {
@@ -3010,8 +3019,8 @@ describe('vercel()', () => {
     // The API names an issuer's caller by its sub, as a board does.
     for (const claims of [{ project_id: '42' }, { sub: 'project_path:acme*' }] as Record<string, string>[])
       await expect(jb.updateGrant(grant.id, { add: [{ kind: 'oidc', issuer: 'https://gitlab.com', claims }] })).rejects.toMatchObject({ status: 400, code: 'invalid_grant' })
-    const [made] = (await jb.createGrants([{ principals: [{ kind: 'github', repository: 'acme/api', event: 'push' }], can: { 'deploys/': ['read'] } }])).grants
-    expect(made?.principals).toEqual([{ kind: 'github', repositoryId: '700002', repository: 'acme/api', event: 'push' }])
+    const { grant: made } = await jb.createGrant({ principals: [{ kind: 'github', repository: 'acme/api', event: 'push' }], can: { 'deploys/': ['read'] } })
+    expect(made.principals).toEqual([{ kind: 'github', repositoryId: '700002', repository: 'acme/api', event: 'push' }])
     // What the API decides for a run on main, and for one on another branch, which the grant doesn't name.
     expect(await jb.explain('ci/www', { github: 'acme/web', branch: 'main' })).toMatchObject({ pattern: 'ci/', level: 'principal', grants: [{ id: grant.id }], can: ['post'] })
     expect(await jb.explain('ci/www', { github: 'acme/web', branch: 'dev' })).toMatchObject({ pattern: null, grants: [], can: [] })

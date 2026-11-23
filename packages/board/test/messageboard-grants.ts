@@ -415,21 +415,6 @@ export function fakeGrants(options: {
         if (namesIssuer(principals)) mayGrant(who, ['*'], after, 'naming an oidc issuer')
         return { grant: viewOf(unlessLockedOut(who, patternsOf(can), body.lockMeOut, 'this grant', () => add(principals, can, by))) }
       }
-      if (method === 'POST' && rest === '/grants/batch') {
-        if (!Array.isArray(body.grants) || body.grants.length === 0 || body.grants.length > 16) throw invalid('a batch makes 1 to 16 grants')
-        const made: { principals: Stored[]; can: Can }[] = body.grants.map((input: Record<string, any>) => {
-          if (!Array.isArray(input.principals) || input.principals.length === 0) throw invalid('a grant names its principals')
-          return { principals: input.principals.map((principal: Record<string, any>) => resolve(principal)), can: checkCan(input.can) }
-        })
-        // Each by the grants as they are, and what everyone gets with all of them made: all, or none.
-        const after = [...grants.values(), ...made.map((grant) => ({ id: '', ...grant, by, at: 0 }))]
-        for (const grant of made) {
-          mayGrant(who, patternsOf(grant.can), after, 'granting')
-          if (namesIssuer(grant.principals)) mayGrant(who, ['*'], after, 'naming an oidc issuer')
-        }
-        const patterns = made.flatMap((grant) => patternsOf(grant.can))
-        return { grants: unlessLockedOut(who, patterns, body.lockMeOut, 'these grants', () => made.map((grant) => add(grant.principals, grant.can, by))).map(viewOf) }
-      }
       if (method === 'GET' && rest === '/grants/explain') {
         const channel = url.searchParams.get('channel')
         if (!channel) throw new GrantRefused(400, 'invalid_request', 'explain takes a channel')

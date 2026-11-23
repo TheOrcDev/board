@@ -3447,10 +3447,9 @@ export function createVercel(options: VercelOptions, environment: VercelEnvironm
       const { grant } = await api<Protocol['createGrant']['output']>(who, 'POST', await onBoard(who, '/grants'), { body: { operationId: operationId(), ...input }, ...(signal ? { signal } : {}) })
       return { grant: grantFrom(grant) }
     },
-    async createGrants(caller, input, signal) {
-      const who = whoOf(caller)
-      const { grants } = await api<Protocol['createGrants']['output']>(who, 'POST', await onBoard(who, '/grants/batch'), { body: { operationId: operationId(), ...input }, ...(signal ? { signal } : {}) })
-      return { grants: grants.map(grantFrom) }
+    // Vercel's API has no batch of grants: it answers 404 for `/grants/batch`.
+    async createGrants() {
+      throw notSupported('making several grants in one write', 'make each with `vb grants create`, the ones that keep you in before a lock')
     },
     async updateGrant(caller, { id, ...change }, signal) {
       const who = whoOf(caller)
