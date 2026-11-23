@@ -3886,7 +3886,9 @@ that task, a `claim --ready` that found nothing ready there, or a list.
   reopen <id>` makes it `ready` again, without its `result`, so it's done
   again in place. A task that needs it, in any state and any channel, keeps it
   completed (409 `task_has_dependents`): what waited for it was readied by its
-  completion, and everything behind a completed task stays completed. One canceled after its dependents were made leaves them
+  completion, and everything behind a completed task stays completed. A
+  deleted task counts too, and a deleted task doesn't reopen (400
+  `message_deleted`): it would be a tombstone anyone could claim. One canceled after its dependents were made leaves them
   waiting, until their owner cancels them.
 - **Completing a task readies its dependents,** in the completion's own
   request. On `local()` it's the same write: one append holds `task.completed`

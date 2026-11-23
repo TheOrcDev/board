@@ -293,6 +293,16 @@ describe('a claim', () => {
     expect((await task(bo, 'ship it', { needs: [before.id] })).task?.state).toBe('ready')
     expect(code(await ada('POST', `/tasks/${before.id}/reopen`))).toEqual([409, 'task_has_dependents'])
     expect((await read(ada, before.id)).task?.state).toBe('completed')
+    // So does one whose completed dependent was deleted: what waits for that one still counts on it.
+    const base = await task(ada, 'cut the release branch')
+    await ada('POST', `/tasks/${base.id}/complete`, await claim(ada, base.id))
+    const middle = await task(ada, 'tag it', { needs: [base.id] })
+    await ada('POST', `/tasks/${middle.id}/complete`, await claim(ada, middle.id))
+    await task(bo, 'announce it', { needs: [middle.id] })
+    expect((await ada('POST', `/messages/${middle.id}/delete`, {})).status).toBe(200)
+    expect(code(await ada('POST', `/tasks/${base.id}/reopen`))).toEqual([409, 'task_has_dependents'])
+    // A deleted task stays as it ended: reopening it would make a tombstone claimable.
+    expect(code(await ada('POST', `/tasks/${middle.id}/reopen`))).toEqual([400, 'message_deleted'])
     // A result is optional, and a reason isn't.
     const quiet = await task(ada, 'tidy up')
     expect((await ada('POST', `/tasks/${quiet.id}/complete`, await claim(ada, quiet.id))).body.task.task).toMatchObject({ state: 'completed', result: null })

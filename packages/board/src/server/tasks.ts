@@ -6,7 +6,7 @@ import { LEASES_SESSION, leasesContract, type LeaseEvents } from '../contract/co
 import type { BoardEvent } from '../contract/events.ts'
 import { foldMessages, type Message, type MessagesState, type Task } from '../contract/folds.ts'
 import { actorsReducer, channelsReducer } from '../contract/reducers.ts'
-import { OPEN_TASK_STATES, TASK_BATCH_MAX, TASK_KEY_MAX, TASK_LABEL, TASK_NEEDS_MAX, TASK_NOTE_MAX, TaskHoldKind, TaskState } from '../contract/schemas.ts'
+import { OPEN_TASK_STATES, TASK_BATCH_MAX, TASK_KEY_MAX, TASK_LABEL, TASK_NEEDS_MAX, TASK_NOTE_MAX, TaskHoldKind, type TaskState } from '../contract/schemas.ts'
 import { batchPlan, type BatchNeed } from '../contract/task-batch.ts'
 import { authorize, type Access, type Permission } from './access.ts'
 import { badRequest, batchTooLarge, forbidden, HttpError, notFound } from './errors.ts'
@@ -386,10 +386,18 @@ export function createTasks(options: { store?: A2Store | undefined; scheduler?: 
     return ids.every((id) => found.get(id)?.task?.state === 'completed')
   }
 
-  /** Whether any task, in any state, waits for task `id`, as of `position`. */
+  /**
+   * Whether any task, in any state, waits for task `id`, as of `position`. It reads every root, deleted ones
+   * included: a deleted task wears no `board.task`, and a completed one still stands behind what waits for it.
+   */
   async function awaited(id: number, position: number): Promise<boolean> {
-    for await (const root of rootsAt({}, TaskState.options, position)) if (root.task.needs.includes(id)) return true
-    return false
+    for (let after = 0; ; ) {
+      const page = await writes().reads.tables.roots({}, { after, limit: PAGE })
+      if (page.position !== position) throw movedOn()
+      if (page.threads.some(({ root }) => root.task?.needs.includes(id))) return true
+      if (page.threads.length < PAGE) return false
+      after = page.threads.at(-1)!.root.id
+    }
   }
 
   /** Every root that wears `board.task` as one of `states` and matches `filter`, oldest first, all as of `position`. */
@@ -775,6 +783,7 @@ export function createTasks(options: { store?: A2Store | undefined; scheduler?: 
       owns(identity, await taskOf(identity.principal.access, id))
       const root = await changeTask(identity, id, async (found, position) => {
         if (found.task.state === 'canceled') throw conflict('task_finished', `#${id} is canceled`)
+        if (found.deleted && (found.task.state === 'failed' || found.task.state === 'completed')) throw badRequest('message was deleted', 'message_deleted')
         if (found.task.state === 'completed' && (await awaited(id, position))) throw conflict('task_has_dependents', `#${id} has tasks that wait for it: only a completed task nothing waits for reopens`)
         return found.task.state === 'failed' || found.task.state === 'completed' ? [{ type: 'task.reopened', payload: { id, thread: found.thread, by: identity.author } }] : []
       })
