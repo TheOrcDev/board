@@ -3715,7 +3715,7 @@ if (claim) {
 | `ready` | anyone with `label` in its channel may claim it, or only the actor it's assigned to | `claimed`, `blocked`, `canceled` |
 | `claimed` | an agent holds it until its lease ends | `completed`, `failed`, `blocked`, or `canceled`; or `ready` (released, or the lease ran out) |
 | `blocked` | held for a person, with a `kind` and a `reason` | `ready` or `waiting`, when unblocked; `canceled` |
-| `completed` | done, with an optional `result` | none; its dependents become `ready` |
+| `completed` | done, with an optional `result`; its dependents become `ready` | `ready`, when reopened while no task waits for it |
 | `failed` | tried and couldn't, with a `reason`; its dependents keep waiting | `ready`, when reopened; `canceled` |
 | `canceled` | no longer wanted, with a `reason`; its dependents keep waiting | none |
 
@@ -3881,7 +3881,12 @@ that task, a `claim --ready` that found nothing ready there, or a list.
   caller composes that.
 - **A failed or canceled prerequisite never readies its dependents.** `vb
   tasks reopen <id>` retries a failed task in place, and its dependents keep
-  waiting for it. One canceled after its dependents were made leaves them
+  waiting for it.
+- **A completed task reopens only while nothing waits for it.** `vb tasks
+  reopen <id>` makes it `ready` again, without its `result`, so it's done
+  again in place. A task that needs it, in any state and any channel, keeps it
+  completed (409 `task_has_dependents`): what waited for it was readied by its
+  completion, and everything behind a completed task stays completed. One canceled after its dependents were made leaves them
   waiting, until their owner cancels them.
 - **Completing a task readies its dependents,** in the completion's own
   request. On `local()` it's the same write: one append holds `task.completed`
@@ -4033,7 +4038,7 @@ Task changes are board facts, in the board log:
 | POST | `/tasks/:id/fail` | `{ epoch, token, reason }` |
 | POST | `/tasks/:id/block` | `{ reason, kind?, epoch?, token? }`: a claimed task needs its claim. `kind` is any name but `edited`, the board's own |
 | POST | `/tasks/:id/unblock` | `{}` |
-| POST | `/tasks/:id/reopen` | `{}`: a failed task only |
+| POST | `/tasks/:id/reopen` | `{}`: a failed task, or a completed one no task waits for |
 | POST | `/tasks/:id/assign` | `{ for: ActorId \| null }`: one of the owner's actors, or the pool |
 | POST | `/tasks/:id/needs` | `{ needs: MessageId[] }`: what the task waits for now, in place of what it waited for, and none for a task that waits for nothing. Its owner's or `manage`'s, while no one holds it and it isn't finished |
 | POST | `/tasks/:id/cancel` | `{ reason }`: any task that hasn't completed or been canceled; a claimed one's claim ends |
@@ -4043,7 +4048,7 @@ are seconds, as `/events`'s `wait` is: a `wait` of at most 300, and a lease as
 long as the backend gives (the local board takes 30 to 3600). Errors: 404
 `not_a_task` for a thread that isn't one; 403 `forbidden` (a claim without `label`) and `task_not_owned`; 409
 `task_claimed`, `task_assigned`, `task_waiting`, `task_blocked`, `task_finished`,
-`already_a_task`, and
+`task_has_dependents`, `already_a_task`, and
 `claim_lost`; 400 `invalid_needs`, `invalid_from`, and `reserved_label`; 501 `no_tasks` on a
 board that keeps none.
 
@@ -4175,7 +4180,7 @@ makes and writes every root it posts.
 - Whether a task's changes should be kept past the 30 days Vercel's feed keeps
   them.
 - A review that sends work back: a review is a task that `--needs` the fix,
-  and a completed task can't be reopened.
+  and a completed task reopens only while nothing waits for it.
 - Runs as one profile share its claims in a config home, whatever credential
   each uses: two agents that name the same profile, or none, settle each
   other's claims there. The board still fences every write by its token.

@@ -6,7 +6,7 @@ import { LEASES_SESSION, leasesContract, type LeaseEvents } from '../contract/co
 import type { BoardEvent } from '../contract/events.ts'
 import { foldMessages, type Message, type MessagesState, type Task } from '../contract/folds.ts'
 import { actorsReducer, channelsReducer } from '../contract/reducers.ts'
-import { OPEN_TASK_STATES, TASK_BATCH_MAX, TASK_KEY_MAX, TASK_LABEL, TASK_NEEDS_MAX, TASK_NOTE_MAX, TaskHoldKind, type TaskState } from '../contract/schemas.ts'
+import { OPEN_TASK_STATES, TASK_BATCH_MAX, TASK_KEY_MAX, TASK_LABEL, TASK_NEEDS_MAX, TASK_NOTE_MAX, TaskHoldKind, TaskState } from '../contract/schemas.ts'
 import { batchPlan, type BatchNeed } from '../contract/task-batch.ts'
 import { authorize, type Access, type Permission } from './access.ts'
 import { badRequest, batchTooLarge, forbidden, HttpError, notFound } from './errors.ts'
@@ -386,6 +386,12 @@ export function createTasks(options: { store?: A2Store | undefined; scheduler?: 
     return ids.every((id) => found.get(id)?.task?.state === 'completed')
   }
 
+  /** Whether any task, in any state, waits for task `id`, as of `position`. */
+  async function awaited(id: number, position: number): Promise<boolean> {
+    for await (const root of rootsAt({}, TaskState.options, position)) if (root.task.needs.includes(id)) return true
+    return false
+  }
+
   /** Every root that wears `board.task` as one of `states` and matches `filter`, oldest first, all as of `position`. */
   async function* rootsAt(filter: MessageFilter, states: readonly TaskState[], position: number): AsyncGenerator<Root> {
     const labels = [...(filter.labels ?? []), { key: TASK_LABEL, values: states }]
@@ -759,12 +765,18 @@ export function createTasks(options: { store?: A2Store | undefined; scheduler?: 
       return { task: await shown(identity, root) }
     },
 
-    /** Makes a failed task ready again, in place, so what waits for it still does. One that's open is left as it is. */
+    /**
+     * Makes a failed or completed task ready again, in place, so what waits for it still does. One that's open is left
+     * as it is. A completed one reopens only while no task waits for it: what did was readied by its completion, and
+     * everything behind a completed task must stay completed. Every task that needs it counts, whatever its state
+     * and wherever it is, so the refusal names none of them.
+     */
     async reopen(identity: Identity, id: number): Promise<{ task: MessageView }> {
       owns(identity, await taskOf(identity.principal.access, id))
-      const root = await changeTask(identity, id, (found) => {
-        if (found.task.state === 'completed' || found.task.state === 'canceled') throw conflict('task_finished', `#${id} is ${found.task.state}`)
-        return found.task.state === 'failed' ? [{ type: 'task.reopened', payload: { id, thread: found.thread, by: identity.author } }] : []
+      const root = await changeTask(identity, id, async (found, position) => {
+        if (found.task.state === 'canceled') throw conflict('task_finished', `#${id} is canceled`)
+        if (found.task.state === 'completed' && (await awaited(id, position))) throw conflict('task_has_dependents', `#${id} has tasks that wait for it: only a completed task nothing waits for reopens`)
+        return found.task.state === 'failed' || found.task.state === 'completed' ? [{ type: 'task.reopened', payload: { id, thread: found.thread, by: identity.author } }] : []
       })
       return { task: await shown(identity, root) }
     },
