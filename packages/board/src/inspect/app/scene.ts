@@ -35,6 +35,8 @@ import { BLOCK, ROAD, ROOFS, roofOf, WALL as WALL_THICK, type House, type Reside
 
 /** How high walls stand. */
 const WALL = 46
+/** How thick a block's slab of grass is: houses and people stand on it. */
+const SLAB = 2
 const TILT = (50 * Math.PI) / 180
 const FOV = 32
 /** How fast people walk, in the layout's pixels a second. */
@@ -240,7 +242,8 @@ export class World {
         this.houses.set(house.channel, things)
       }
       if (!things) this.houses.set(house.channel, (things = this.build(house)))
-      things.group.position.set(house.x, 0, house.y)
+      // On its block's slab of grass, not in it.
+      things.group.position.set(house.x, SLAB, house.y)
       things.open = house.channel === open
       things.busy = house.busy
       const on = lit.has(house.channel)
@@ -432,7 +435,7 @@ export class World {
       const within = person.path.length > 0 ? person.path[0]!.channel : person.channel
       person.group.visible = within === null || this.houses.get(within)?.open === true
       person.body.position.y = !walking && person.path.length === 0 && person.seated ? -9 : Math.abs(Math.sin(person.step)) * 4
-      person.group.position.set(person.at.x, 0, person.at.z)
+      person.group.position.set(person.at.x, SLAB, person.at.z)
     }
 
     this.renderer.render(this.scene, this.camera)
@@ -460,7 +463,9 @@ export class World {
         // A label hangs above its point, centered on it, or below it.
         const size = this.sizeOf(element)
         const below = element.classList.contains('below')
-        const box = { left: x - size.width / 2 - 3, right: x + size.width / 2 + 3, top: below ? y - 2 : y - size.height - 2, bottom: below ? y + size.height + 2 : y + 2 }
+        const centered = element.classList.contains('centered')
+        const top = centered ? y - size.height / 2 : below ? y : y - size.height
+        const box = { left: x - size.width / 2 - 3, right: x + size.width / 2 + 3, top: top - 2, bottom: top + size.height + 2 }
         if (label.rank !== undefined) shown = !taken.some((t) => box.left < t.right && box.right > t.left && box.top < t.bottom && box.bottom > t.top)
         if (shown) taken.push(box)
       }
@@ -549,8 +554,8 @@ export class World {
     this.streets.add(road)
     const grass = new MeshStandardMaterial({ color: this.palette.ground, roughness: 1 })
     for (const block of town.blocks) {
-      const slab = new Mesh(new BoxGeometry(BLOCK.width, 2, block.depth), grass)
-      slab.position.set(block.x + BLOCK.width / 2, 1, block.y + block.depth / 2)
+      const slab = new Mesh(new BoxGeometry(BLOCK.width, SLAB, block.depth), grass)
+      slab.position.set(block.x + BLOCK.width / 2, SLAB / 2, block.y + block.depth / 2)
       slab.receiveShadow = true
       this.streets.add(slab)
     }

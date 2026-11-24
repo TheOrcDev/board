@@ -648,7 +648,7 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
   .town {
     --sky: #0e1216;
     --ground: #1a2219;
-    --street: #2a3129;
+    --street: #3a4239;
     --walls: #3a3b36;
     --ink: #8d8d8d;
     --window: #2c3238;
@@ -668,8 +668,9 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
 /* A label sits at its point: the scene moves it there each frame, and its content hangs above it. */
 .town-labels .over { position: absolute; left: 0; top: 0; will-change: transform; }
 .town-labels .over > * { position: absolute; left: 0; bottom: 0; width: max-content; transform: translateX(-50%); }
-/* A label under its point instead: a table's, below its near edge. */
+/* A label under its point instead, or centered on it: a table's, on its top. */
 .town-labels .over.below > * { bottom: auto; top: 0; }
+.town-labels .over.centered > * { bottom: auto; top: 0; transform: translate(-50%, -50%); }
 .town-labels button { pointer-events: auto; }
 .town .plate {
   display: flex;

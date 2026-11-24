@@ -17,7 +17,7 @@ export const GONE_MS = 24 * 60 * 60_000
 
 /** A house's walls, and the room in front of them for its sign. */
 export const WALL = 10
-const FRONT = 70
+const FRONT = 96
 /** One table's share of a floor: the table, its chairs, and room to walk between. */
 export const CELL = { width: 170, depth: 132 }
 /** Room between two houses on a street, and between a row of houses and the street in front of it. */
@@ -293,7 +293,7 @@ export function townOf(state: State, now: number, options: { here?: string | nul
       // No table for their thread, or no seat left at it: they stand inside the door.
       const n = lobby.get(one.channel) ?? 0
       lobby.set(one.channel, n + 1)
-      inside = { x: house.x + house.width / 2 - AVATAR / 2 + (n % 2 === 0 ? 1 : -1) * Math.ceil(n / 2) * STEP, y: house.y + house.depth - WALL - 50 }
+      inside = { x: house.x + house.width / 2 - AVATAR / 2 + (n % 2 === 0 ? 1 : -1) * Math.ceil(n / 2) * STEP, y: house.y + house.depth - WALL - 22 }
     }
     // One bubble to a house, the newest speaker's, so a crowd's don't pile up.
     const bubble = one.bubble && !spoke.has(one.channel) ? one.bubble : null

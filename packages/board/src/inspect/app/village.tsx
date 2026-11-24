@@ -72,7 +72,8 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
         <div className="town-labels">
           {/* Each district's name, at the corner of its first block. */}
           {town.streets.map((street) => (
-            <div key={`street:${street.name}`} className="over below" ref={over(`street:${street.name}`, () => new Vector3(street.x + 90, 0, street.y + 6), 4)}>
+            // On the road above the block, clear of its houses.
+            <div key={`street:${street.name}`} className="over" ref={over(`street:${street.name}`, () => new Vector3(street.x + 90, 0, street.y - 12), 4)}>
               <span className="street-sign">{street.name}</span>
             </div>
           ))}
@@ -105,8 +106,8 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
               </div>
             ))}
           {open?.tables.map((table) => (
-            // What the thread is, hung under the near edge of its table, clear of the faces behind it.
-            <div key={`table:${table.thread}`} className="over below table-label" ref={over(`table:${table.thread}`, () => new Vector3(table.x + 70, 0, table.y + 40), table.seated > 0 ? 2 : 0)}>
+            // What the thread is, on its tabletop: under the faces of who sits behind it, and on no other table.
+            <div key={`table:${table.thread}`} className="over centered table-label" ref={over(`table:${table.thread}`, () => new Vector3(table.x + 70, 26, table.y + 17), table.seated > 0 ? 2 : 0)}>
               <button onClick={() => navigate(hereWith({ thread: table.thread }))} title="open the thread">
                 <span className="label">{table.label || 'a thread'}</span>
                 {table.task && <span className={`state ${table.task}`}>{table.task}</span>}
