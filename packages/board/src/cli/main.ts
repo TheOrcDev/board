@@ -248,6 +248,8 @@ let warnings: Warning[] = []
 let bareMentions: string | undefined
 /** The board this run reached by its URL, for a failure to name. */
 let reached: string | null = null
+/** The task `tasks run` holds, once it's claimed one: with --ready, the command line names only its channel. */
+let runTask: string | undefined
 /** The team whose default board this run reached, nothing naming one of its boards: `--scope`'s, or the one the environment finds. */
 let teamDefault: { team: string | undefined } | null = null
 /** Where the credential this run sent came from, as `whoami` says it, for a refusal to say which to replace. */
@@ -1044,6 +1046,10 @@ function failureOf(error: unknown): Failure {
       ]),
       details: [],
     }
+  // A task's result or reason over what the board keeps, in its own words (each board says it its way, with its own limit):
+  // the full report goes in a reply in the task's thread, and the note in a line or two.
+  const note = status === 400 ? taskNoteTooLong(message) : null
+  if (note) return { ...theirs('limit', 'payload_too_large', `Can't ${doing()}. Its ${note} is too long for the board.`, note === 'result' ? noteRecovery('report') : noteRecovery('detail')) }
   // A limit on the team's boards, which the team's plan sets: no argument fixes it, and the team's own board is still there.
   if (code === 'too_many_boards')
     return theirs(
@@ -2633,6 +2639,7 @@ async function tasks(args: string[]): Promise<number> {
     const claim = await claimFor(board, claims, before[0], 'run')
     if (typeof claim === 'number') return claim
     const id = claim.task.id
+    runTask = id
     const lease = seconds('lease')
     const ran = await runCommand(command, {
       env: { ...process.env, BOARD_TASK: id },
@@ -2782,6 +2789,29 @@ async function tasks(args: string[]): Promise<number> {
       return 0
     }
   }
+}
+
+/** Which note a board refused as too long, from its words: `result: a task's result is at most 1,000 characters` here, `result should NOT be longer than 1000 characters` on Vercel's. Null for anything else, and off a task's settling. */
+function taskNoteTooLong(said: string): 'result' | 'reason' | null {
+  const { command, args } = current
+  if (command !== 'tasks' || !['run', 'complete', 'fail', 'block', 'cancel'].includes(args[0] ?? '')) return null
+  const what = /^\s*(result|reason)\b/i.exec(said)?.[1]?.toLowerCase()
+  if ((what !== 'result' && what !== 'reason') || !/(at most|longer than|too long)/i.test(said)) return null
+  return what
+}
+
+/** Where a too-long task note goes: the whole of it in a reply in the task's thread, then the settling again with a line or two. */
+function noteRecovery(whole: 'report' | 'detail'): Recovery[] {
+  const { args } = current
+  const named = args[1] !== undefined && isMessageRef(args[1]) ? messageId(args[1]) : '<ID>'
+  const id = args[0] === 'run' ? (runTask ?? named) : named
+  // A run's command already ran: what's left is completing the task it holds, not running it again.
+  const verb = args[0] === 'run' ? 'complete' : args[0]!
+  // On the same board, as the same profile, whose claim it is.
+  return [
+    { instruction: `Reply the full ${whole} in the task's thread`, argv: [...cli(), 'reply', id, '-', ...onThisBoard()] },
+    { instruction: `Then ${verb} it with a line or two`, argv: [...cli(), 'tasks', verb, id, '<A LINE OR TWO>', ...onThisBoard()] },
+  ]
 }
 
 /** How a board's own word about a task reads from here: the headline, and the way on. Null for any other code. */
@@ -2983,6 +3013,7 @@ async function runOnce(argv: string[], options: App): Promise<number> {
   teamDefault = null
   sent = () => null
   sentLength = 0
+  runTask = undefined
   self = null
   try {
     parse(argv)

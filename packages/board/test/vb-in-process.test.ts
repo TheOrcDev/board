@@ -277,13 +277,20 @@ describe('vb()', () => {
     const held = (await vb(team, ['tasks', 'create', 'work', 'a long build', '--no-sync', '--claim'])).stdout.split('  ')[0]!.slice(1)
     const over = async (args: string[], lines: string[]) => expect(await vb(team, args), args.slice(0, 2).join(' ')).toEqual({ code: 2, stdout: '', stderr: `${lines.join('\n')}\n` })
     const note = 'x'.repeat(1001)
-    await over(['tasks', 'complete', held, note], [`error: Can't complete task #${held}.`, "  result: a task's result is at most 1,000 characters"])
-    await over(['tasks', 'fail', held, note], [`error: Can't fail task #${held}.`, "  reason: a task's reason is at most 1,000 characters"])
     await over(['tasks', 'block', held, 'approve the deploy?', '--kind', 'k'.repeat(65)], [`error: Can't block task #${held}.`, '  kind: a kind is up to 64 lowercase letters, numbers, and _.-'])
-    await over(['tasks', 'cancel', held, note], [`error: Can't cancel task #${held}.`, "  reason: a task's reason is at most 1,000 characters"])
     await over(['tasks', 'create', 'work', 'after them all', ...Array.from({ length: 21 }, (_, n) => ['--needs', String(9000 + n)]).flat()], ["error: Can't create a task in work.", '  needs: a task waits for at most 20 tasks'])
     await over(['tasks', 'claim', '--ready', 'work', ...Array.from({ length: 33 }, (_, n) => ['--from', `vercel:user:u_${n}`]).flat()], ["error: Can't claim a task in work.", '  from: a claim takes tasks from at most 32 owners'])
     await over(['tasks', 'needs', shipped, ...Array.from({ length: 21 }, (_, n) => String(9000 + n))], [`error: Can't change what task #${shipped} needs.`, '  needs: a task waits for at most 20 tasks'])
+    // A result or reason over what a task keeps: the board's words, and where the rest goes.
+    const long = async (verb: string, what: string, rest: string) =>
+      expect(await vb(team, ['tasks', verb, held, note])).toEqual({
+        code: 1,
+        stdout: '',
+        stderr: `error: Can't ${verb} task #${held}. Its ${what} is too long for the board.\n  ${what}: a task's ${what} is at most 1,000 characters\n\n  Reply the full ${rest} in the task's thread:\n    vb reply ${held} -\n  Then ${verb} it with a line or two:\n    vb tasks ${verb} ${held} '<A LINE OR TWO>'\n`,
+      })
+    await long('complete', 'result', 'report')
+    await long('fail', 'reason', 'detail')
+    await long('cancel', 'reason', 'detail')
     // A root's text is a message's: what to do with the long part, where a task takes it.
     expect(await vb(team, ['tasks', 'create', 'work', 'x'.repeat(10_001)])).toEqual({
       code: 1,
