@@ -6,6 +6,7 @@ import {
   Color,
   DirectionalLight,
   DoubleSide,
+  Fog,
   Float32BufferAttribute,
   Group,
   HemisphereLight,
@@ -35,17 +36,20 @@ const WALL = 46
 const TILT = (48 * Math.PI) / 180
 /** People, to the scale of the houses. */
 const FIGURE_SCALE = 1.5
+/** The farthest the camera starts: a big village is seen a street or so at a time, and you move around it. */
+const FAR_HOUSES = 6
 const FOV = 32
 /** How fast people walk, in the layout's pixels a second. */
 const PACE = 260
 
-type Palette = { ground: string; street: string; walls: string; floor: string; table: string; ink: string; lit: string; window: string; smoke: string; bright: string; roofs: string[] }
+type Palette = { sky: string; ground: string; street: string; walls: string; floor: string; table: string; ink: string; lit: string; window: string; smoke: string; bright: string; roofs: string[] }
 
 /** The village's colors, from the page's own tokens, so it follows light and dark. */
 export function paletteOf(element: Element): Palette {
   const style = getComputedStyle(element)
   const token = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback
   return {
+    sky: token('--sky', '#e9eef2'),
     ground: token('--ground', '#eef1ea'),
     street: token('--street', '#d9ded2'),
     walls: token('--walls', '#fbfaf6'),
@@ -76,7 +80,12 @@ type HouseThings = {
 type PersonThings = { group: Group; materials: MeshStandardMaterial[]; ring: Mesh; at: Vector3; goal: Vector3; agent: boolean; step: number; shown: boolean }
 
 /** A page element kept over a point of the scene: its anchor says where, each frame, or null to hide it. */
-export type Label = { element: HTMLElement; anchor: () => Vector3 | null }
+export type Label = {
+  element: HTMLElement
+  anchor: () => Vector3 | null
+  /** Of labels that would overlap, the higher shows; one with none set always shows. */
+  rank?: number
+}
 
 export type Picked = { house: string } | { thread: string } | null
 
@@ -98,6 +107,11 @@ export class World {
   private still: boolean
   private town: Town | null = null
   private observer: ResizeObserver
+  /** The house the camera was last aimed at (null for the village), so a refresh leaves where you've moved it. */
+  private aimed: string | null | undefined = undefined
+  private drag: { x: number; y: number; moved: number } | null = null
+  /** Each label's size, measured once: placing them reads no layout. */
+  private sizes = new WeakMap<HTMLElement, { width: number; height: number }>()
   private host: HTMLElement
   private onPick: (picked: Picked) => void
   /** The page's labels, by key: each frame moves them over their points. */
@@ -135,7 +149,15 @@ export class World {
     this.observer = new ResizeObserver(() => this.resize())
     this.observer.observe(host)
     this.resize()
-    this.renderer.domElement.addEventListener('click', this.click)
+    this.scene.background = new Color(this.palette.sky)
+    this.scene.fog = new Fog(this.palette.sky, 2000, 6000)
+    const canvas = this.renderer.domElement
+    canvas.addEventListener('click', this.click)
+    canvas.addEventListener('pointerdown', this.press)
+    canvas.addEventListener('pointermove', this.move)
+    canvas.addEventListener('pointerup', this.release)
+    canvas.addEventListener('pointercancel', this.release)
+    canvas.addEventListener('wheel', this.wheel, { passive: false })
     this.loop(performance.now())
   }
 
@@ -145,12 +167,14 @@ export class World {
   repaint() {
     this.palette = paletteOf(this.host)
     ;(this.ground.material as MeshStandardMaterial).color.set(this.palette.ground)
+    ;(this.scene.background as Color).set(this.palette.sky)
+    this.scene.fog!.color.set(this.palette.sky)
     for (const [channel, house] of this.houses) {
       house.group.removeFromParent()
       dispose(house.group)
       this.houses.delete(channel)
     }
-    if (this.town) this.show(this.town, null, new Set())
+    if (this.town) this.show(this.town, this.aimed ?? null, new Set())
   }
 
   /** Where a resident is now, mid-walk included, for their label. */
@@ -214,13 +238,20 @@ export class World {
         this.people.delete(actor)
       }
 
-    this.aim(town, open)
+    // Only walking in or out moves the camera: a refresh leaves it where you've panned it.
+    if (open !== this.aimed) this.aim(town, open)
   }
 
   dispose() {
     cancelAnimationFrame(this.frame)
     this.observer.disconnect()
-    this.renderer.domElement.removeEventListener('click', this.click)
+    const canvas = this.renderer.domElement
+    canvas.removeEventListener('click', this.click)
+    canvas.removeEventListener('pointerdown', this.press)
+    canvas.removeEventListener('pointermove', this.move)
+    canvas.removeEventListener('pointerup', this.release)
+    canvas.removeEventListener('pointercancel', this.release)
+    canvas.removeEventListener('wheel', this.wheel)
     dispose(this.scene)
     this.renderer.dispose()
     this.renderer.domElement.remove()
@@ -237,15 +268,21 @@ export class World {
       this.lookGoal.set(house.x + HOUSE.width / 2, 0, house.y + HOUSE.height / 2 + 20)
       this.distanceGoal = fit(HOUSE.width + 140, HOUSE.height + 180)
     } else {
-      this.lookGoal.set(town.width / 2 + 40, 0, town.height / 2)
-      this.distanceGoal = fit(town.width + 80, town.height + 120)
+      const whole = fit(town.width + 80, town.height + 120)
+      const near = fit(FAR_HOUSES * LOT.width, FAR_HOUSES * LOT.height * 0.6)
+      if (whole <= near) this.lookGoal.set(town.width / 2 + 40, 0, town.height / 2)
+      else {
+        // Too big to read whole: start over where the most people are, and let them move around.
+        const busiest = [...town.houses].sort((a, b) => b.people - a.people || Number(b.busy) - Number(a.busy))[0]!
+        this.lookGoal.set(busiest.x + HOUSE.width / 2, 0, busiest.y + HOUSE.height / 2)
+      }
+      this.distanceGoal = Math.min(whole, near)
     }
+    this.aimed = open
     if (this.last === 0 || this.still) {
       this.look.copy(this.lookGoal)
       this.distance = this.distanceGoal
     }
-    this.sun.target.position.copy(this.lookGoal)
-    this.sun.position.copy(this.lookGoal).add(new Vector3(-900, 1600, 900))
   }
 
   private resize() {
@@ -254,7 +291,7 @@ export class World {
     this.renderer.setSize(width, height, false)
     this.camera.aspect = width / height
     this.camera.updateProjectionMatrix()
-    if (this.town) this.aim(this.town, [...this.houses].find(([, h]) => h.open)?.[0] ?? null)
+    if (this.town) this.aim(this.town, this.aimed ?? null)
   }
 
   // --- each frame ---------------------------------------------------------------------------
@@ -268,6 +305,12 @@ export class World {
     this.distance += (this.distanceGoal - this.distance) * ease
     this.camera.position.set(this.look.x, this.look.y + Math.sin(TILT) * this.distance, this.look.z + Math.cos(TILT) * this.distance)
     this.camera.lookAt(this.look)
+    // The sun's shadows cover what's in view, and the fog hides the village's far edge.
+    this.sun.target.position.copy(this.look)
+    this.sun.position.copy(this.look).add(new Vector3(-900, 1600, 900))
+    const fog = this.scene.fog as Fog
+    fog.near = this.distance * 1.3
+    fog.far = this.distance * 3
 
     for (const house of this.houses.values()) {
       const target = house.open ? 1 : 0
@@ -309,22 +352,80 @@ export class World {
   /** Moves each label over its point, or hides it when the point is off the scene. */
   private place() {
     const { clientWidth: width, clientHeight: height } = this.host
-    for (const { element, anchor } of this.labels.values()) {
-      const at = anchor()
+    const taken: { left: number; right: number; top: number; bottom: number }[] = []
+    // Labels that always show go first, then signs, busiest first.
+    const order = [...this.labels.values()].sort((a, b) => (b.rank ?? Infinity) - (a.rank ?? Infinity))
+    for (const label of order) {
+      const { element } = label
+      const at = label.anchor()
       if (!at) {
         element.style.visibility = 'hidden'
         continue
       }
       const p = at.project(this.camera)
-      const off = p.z > 1 || p.x < -1.2 || p.x > 1.2 || p.y < -1.2 || p.y > 1.2
-      element.style.visibility = off ? 'hidden' : 'visible'
-      element.style.transform = `translate(${((p.x + 1) / 2) * width}px, ${((1 - p.y) / 2) * height}px)`
+      const x = ((p.x + 1) / 2) * width
+      const y = ((1 - p.y) / 2) * height
+      let shown = !(p.z > 1 || p.x < -1.2 || p.x > 1.2 || p.y < -1.2 || p.y > 1.2)
+      if (shown && label.rank !== undefined) {
+        // A label hangs above its point, centered on it.
+        const size = this.sizeOf(element)
+        const box = { left: x - size.width / 2 - 4, right: x + size.width / 2 + 4, top: y - size.height - 2, bottom: y + 2 }
+        shown = !taken.some((t) => box.left < t.right && box.right > t.left && box.top < t.bottom && box.bottom > t.top)
+        if (shown) taken.push(box)
+      }
+      element.style.visibility = shown ? 'visible' : 'hidden'
+      element.style.transform = `translate(${x}px, ${y}px)`
     }
+  }
+
+  private sizeOf(element: HTMLElement) {
+    let size = this.sizes.get(element)
+    if (!size || size.width === 0) {
+      const content = element.firstElementChild as HTMLElement | null
+      size = { width: content?.offsetWidth ?? 0, height: content?.offsetHeight ?? 0 }
+      this.sizes.set(element, size)
+    }
+    return size
+  }
+
+  // --- moving around: drag to pan, the wheel to zoom ---------------------------------------
+
+  private press = (event: PointerEvent) => {
+    if (event.button !== 0) return
+    this.drag = { x: event.clientX, y: event.clientY, moved: 0 }
+    this.renderer.domElement.setPointerCapture(event.pointerId)
+  }
+
+  private move = (event: PointerEvent) => {
+    if (!this.drag) return
+    const dx = event.clientX - this.drag.x
+    const dy = event.clientY - this.drag.y
+    this.drag = { x: event.clientX, y: event.clientY, moved: this.drag.moved + Math.abs(dx) + Math.abs(dy) }
+    // The ground under the pointer follows it: as far across as a pixel spans at the camera's distance.
+    const perPixel = (2 * this.distance * Math.tan((FOV * Math.PI) / 360)) / this.host.clientHeight
+    const shift = new Vector3(-dx * perPixel, 0, (-dy * perPixel) / Math.sin(TILT))
+    this.look.add(shift)
+    this.lookGoal.add(shift)
+  }
+
+  private release = (event: PointerEvent) => {
+    if (this.renderer.domElement.hasPointerCapture(event.pointerId)) this.renderer.domElement.releasePointerCapture(event.pointerId)
+    // A drag that moved isn't a click: the click that follows it is ignored.
+    if (this.drag && this.drag.moved < 5) this.drag = null
+    else setTimeout(() => (this.drag = null))
+  }
+
+  private wheel = (event: WheelEvent) => {
+    event.preventDefault()
+    const town = this.town
+    const most = town ? Math.max(1500, Math.max(town.width, town.height) * 1.6) : 6000
+    this.distanceGoal = Math.min(most, Math.max(320, this.distanceGoal * Math.exp(event.deltaY * 0.0015)))
   }
 
   // --- picking ------------------------------------------------------------------------------
 
   private click = (event: MouseEvent) => {
+    if (this.drag) return
     const rect = this.renderer.domElement.getBoundingClientRect()
     const pointer = new Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1)
     const ray = new Raycaster()

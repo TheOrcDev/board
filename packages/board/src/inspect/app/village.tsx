@@ -60,10 +60,12 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
   useEffect(() => world.current?.show(town, house, lit), [town, house, lit])
 
   /** A label kept over a point of the scene, by its key. */
-  const over = (key: string, anchor: () => Vector3 | null) => (element: HTMLElement | null) => {
-    if (element) labels.current.set(key, { element, anchor })
+  const over = (key: string, anchor: () => Vector3 | null, rank?: number) => (element: HTMLElement | null) => {
+    if (element) labels.current.set(key, { element, anchor, ...(rank === undefined ? {} : { rank }) })
     else labels.current.delete(key)
   }
+  /** Of two signs that would overlap, the one that shows: the house you're in, then one with people, then one with tasks. */
+  const rankOf = (h: (typeof town.houses)[number]) => (h.channel === house ? 3 : h.people > 0 ? 2 : h.tasks > 0 ? 1 : 0)
   const around = town.residents.filter((r) => !r.idle).length
   const open = town.houses.find((h) => h.channel === house)
   return (
@@ -79,7 +81,7 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
         {town.houses.length === 0 && <p className="empty">{state.cursor === null ? 'loading…' : 'no houses yet: a channel is a house, so post in one'}</p>}
         <div className="town-labels">
           {town.houses.map((h) => (
-            <div key={`house:${h.channel}`} className="over" ref={over(`house:${h.channel}`, () => new Vector3(h.x + HOUSE.width / 2, 0, h.y + LOT.plate - 6))}>
+            <div key={`house:${h.channel}`} className="over" ref={over(`house:${h.channel}`, () => new Vector3(h.x + HOUSE.width / 2, 0, h.y + LOT.plate - 6), rankOf(h))}>
               <button className={`plate${h.channel === house ? ' open' : ''}`} onClick={() => enter(h.channel)} title={h.channel === house ? `#${h.channel}` : `walk into #${h.channel}`}>
                 <span className="name">#{h.name}</span>
                 {h.tasks > 0 && <span className="count" title={`${h.tasks} open task${h.tasks === 1 ? '' : 's'}`}>{h.tasks}</span>}

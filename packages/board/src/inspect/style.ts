@@ -626,6 +626,7 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
 
 /* --- boardville: the board as a village in 3D, its text as page elements over the scene --- */
 .town {
+  --sky: #e6eef3;
   --ground: #dfe8d4;
   --street: #cfd4c4;
   --walls: #fbfaf6;
@@ -644,6 +645,7 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
 }
 @media (prefers-color-scheme: dark) {
   .town {
+    --sky: #0e1216;
     --ground: #1a2219;
     --street: #2a3129;
     --walls: #3a3b36;
