@@ -13,7 +13,7 @@ import { http } from '../backend-http/index.ts'
 import { credentialed, credentialSource, handTeam, vercel } from '../backend-vercel/index.ts'
 import { board as boardAt, type Board } from '../server/index.ts'
 import { isBoardName } from '../server/board.ts'
-import { apiThreadRoot, isApiMessageId } from '../server/backend-vercel.ts'
+import { apiThreadRoot, handSurface, isApiMessageId } from '../server/backend-vercel.ts'
 import { normalizeEmoji } from '../contract/emoji.ts'
 import { ATTACHMENTS_PER_MESSAGE_MAX, DIRECT_UPLOAD_BYTES_MAX, MESSAGE_TEXT_MAX, type Attachment, AttachmentId } from '../contract/schemas.ts'
 import { VERSION } from '../version.ts'
@@ -2948,6 +2948,7 @@ export async function main(argv: string[], options: App): Promise<number> {
   handToken(options.token ?? null)
   handTeam(options.team ?? null)
   handFetch(options.fetch ?? null)
+  handSurface('cli')
   try {
     return await runOnce(argv, options)
   } finally {
@@ -2955,6 +2956,7 @@ export async function main(argv: string[], options: App): Promise<number> {
     handToken(null)
     handTeam(null)
     handFetch(null)
+    handSurface(null)
   }
 }
 
