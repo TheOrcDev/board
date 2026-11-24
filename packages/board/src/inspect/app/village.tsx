@@ -4,7 +4,7 @@ import { Vector3 } from 'three'
 import { here as hereWith, navigate, useNow } from './nav.tsx'
 import { type State } from './store.ts'
 import { World, type Label, type Picked } from './scene.ts'
-import { LOT, PLATE, townOf, type House, type Resident } from './town.ts'
+import { PLATE, townOf, type House, type Resident } from './town.ts'
 import { Header } from './ui.tsx'
 
 /**
@@ -43,12 +43,7 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
     }
   }, [])
 
-  const count = Object.keys(state.channels).length
-  // Rows a set number of standard houses wide, for a village a little wider than deep. It's set by the
-  // houses alone, never the page: a pane opening or the window resizing moves no house, and the camera
-  // pans and zooms to show what doesn't fit.
-  const columns = Math.max(2, Math.min(count || 1, Math.round(Math.sqrt(((count || 1) * 1.6 * LOT.height) / LOT.width))))
-  const town = useMemo(() => townOf(state, now, columns, { here: house }), [state.messages, state.channels, state.actors, state.ops, state.me, now, columns, house])
+  const town = useMemo(() => townOf(state, now, { here: house }), [state.messages, state.channels, state.actors, state.ops, state.me, now, house])
   const lit = useMemo(() => new Set(town.residents.filter((r) => !r.idle).map((r) => r.channel)), [town])
   useEffect(() => world.current?.show(town, house, lit), [town, house, lit])
 
@@ -75,6 +70,12 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
       <div className={`town${house ? ' inside' : ''}`} ref={host}>
         {town.houses.length === 0 && <p className="empty">{state.cursor === null ? 'loading…' : 'no houses yet: a channel is a house, so post in one'}</p>}
         <div className="town-labels">
+          {/* Each district's name, at the corner of its first block. */}
+          {town.streets.map((street) => (
+            <div key={`street:${street.name}`} className="over below" ref={over(`street:${street.name}`, () => new Vector3(street.x + 90, 0, street.y + 6), 4)}>
+              <span className="street-sign">{street.name}</span>
+            </div>
+          ))}
           {town.houses.map((h) => (
             <div key={`house:${h.channel}`} className="over" ref={over(`house:${h.channel}`, () => new Vector3(h.x + h.width / 2, 0, h.y + h.depth + PLATE - 8), rankOf(h))}>
               <button className={`plate${h.channel === house ? ' open' : ''}`} onClick={() => enter(h.channel)} title={h.channel === house ? `#${h.channel}` : `walk into #${h.channel}`}>
@@ -104,15 +105,41 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
               </div>
             ))}
           {open?.tables.map((table) => (
-            <div key={`table:${table.thread}`} className="over table-label" ref={over(`table:${table.thread}`, () => new Vector3(table.x + 70, 26, table.y + 2), table.seated > 0 ? 2 : 0)}>
+            // What the thread is, hung under the near edge of its table, clear of the faces behind it.
+            <div key={`table:${table.thread}`} className="over below table-label" ref={over(`table:${table.thread}`, () => new Vector3(table.x + 70, 0, table.y + 40), table.seated > 0 ? 2 : 0)}>
               <button onClick={() => navigate(hereWith({ thread: table.thread }))} title="open the thread">
                 <span className="label">{table.label || 'a thread'}</span>
                 {table.task && <span className={`state ${table.task}`}>{table.task}</span>}
               </button>
             </div>
           ))}
+          {open?.tables.map((table) => {
+            const seated = town.residents.filter((r) => r.channel === house && r.seated && r.thread === table.thread)
+            if (seated.length === 0) return null
+            const speaker = seated.find((r) => r.bubble)
+            return (
+              // Who sits at a table, in one pill over their heads, as a room's names show over it.
+              <div key={`seats:${table.thread}`} className="over" ref={over(`seats:${table.thread}`, () => new Vector3(table.x + 70, 86, table.y - 24))}>
+                <div className="stack">
+                  {speaker && (
+                    <button className="bubble" onClick={() => navigate(hereWith({ thread: speaker.bubble!.thread }))} title="open the thread">
+                      {seated.length > 1 && <span className="who">{speaker.you ? 'you' : speaker.name}</span>}
+                      <span className="text">{speaker.bubble!.text}</span>
+                    </button>
+                  )}
+                  <span className="roof-pill" title={seated.map((r) => r.name).join(', ')}>
+                    <i className={seated.some((r) => !r.idle) ? 'on' : ''} />
+                    {seated.some((r) => r.agent) && <Bot size={11} strokeWidth={2} />}
+                    {seated.map((r) => (r.you ? 'you' : r.name)).join(', ')}
+                    {seated.some((r) => r.working) && <Hammer size={11} strokeWidth={2} />}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
           {town.residents.map((r) => (
-            <PersonLabel key={`person:${r.actor}`} resident={r} attach={over(`person:${r.actor}`, () => world.current?.personAt(r.actor) ?? null)} />
+            // Everyone on their feet, standing or walking, has a pill of their own; who's seated is in their table's.
+            <PersonLabel key={`person:${r.actor}`} resident={r} attach={over(`person:${r.actor}`, () => (world.current?.settled(r.actor) && r.channel === house ? null : (world.current?.personAt(r.actor) ?? null)))} />
           ))}
         </div>
       </div>

@@ -24,8 +24,19 @@ export const CELL = { width: 170, depth: 132 }
 const GAP = { x: 70, y: 96 }
 /** Where a house's sign hangs, under its front wall. */
 export const PLATE = 44
-/** A street's sign, on the left of its first row. */
-export const SIGN = 132
+/**
+ * A city block: its houses stand on it in rows, each row's fronts on one line, facing the road in front. Two
+ * rows of standard houses fit on one, or a hall of sixteen tables with room to walk around it.
+ */
+export const BLOCK = { width: 1000, depth: 1000 }
+/** The roads between blocks. */
+export const ROAD = 110
+/** Between a block's edge and its houses. */
+const INSET = 34
+/** The path between the two halves of a block that two small districts share. */
+const PATH = 20
+/** Half a block's depth: a small district's, whose houses fit in one row. */
+const HALF = (BLOCK.depth - PATH) / 2
 /** A standard house's lot, which `columns` counts in. */
 export const LOT = { width: 2 * WALL + 2 * CELL.width + GAP.x, height: 2 * WALL + 2 * CELL.depth + FRONT + GAP.y }
 /** Seats at a table: three on each side. */
@@ -81,7 +92,11 @@ export type House = {
   who: { name: string; agent: boolean; idle: boolean }[]
 }
 
-export type Street = { name: string; y: number; depth: number }
+/** A district: the houses of one path prefix, on blocks of their own; its sign stands at its first block's corner. */
+export type Street = { name: string; x: number; y: number }
+
+/** A block of the city, with the district it belongs to. */
+export type Block = { x: number; y: number; depth: number; district: string }
 
 export type Spot = { x: number; y: number }
 
@@ -112,18 +127,38 @@ export type Resident = {
   you: boolean
 }
 
-export type Town = { streets: Street[]; houses: House[]; residents: Resident[]; width: number; height: number }
+/** The village: where its blocks, houses, and people are, and the city's extent, from `left` and `top`. */
+export type Town = { streets: Street[]; blocks: Block[]; houses: House[]; residents: Resident[]; left: number; top: number; width: number; height: number }
+
+/**
+ * The `n`th block of a square spiral out from the middle, in blocks: the middle one, then the ring of eight
+ * around it, and so on. The same `n` is the same block, however big the city gets.
+ */
+export function spiral(n: number): { bx: number; by: number } {
+  if (n === 0) return { bx: 0, by: 0 }
+  // Ring r holds the blocks numbered (2r-1)^2 to (2r+1)^2 - 1, walked from its top-left corner, clockwise.
+  const r = Math.ceil((Math.sqrt(n + 1) - 1) / 2)
+  const side = 2 * r
+  const along = n - (2 * r - 1) ** 2
+  const edge = Math.floor(along / side)
+  const step = along % side
+  if (edge === 0) return { bx: -r + step + 1, by: -r }
+  if (edge === 1) return { bx: r, by: -r + step + 1 }
+  if (edge === 2) return { bx: r - step - 1, by: r }
+  return { bx: -r, by: r - step - 1 }
+}
 
 /** The street a channel is on: what's before its last `/`, or the main street. */
 export const streetOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')
 
 /**
- * The village for `state` at `now`, a row about `columns` standard houses wide. Streets go by name,
- * the main street first, and a street wraps onto rows of its own. Each row's houses stand with their
- * fronts on one line, facing its street. `here` is the house you've walked into, where you stand.
+ * The village for `state` at `now`, as a city that stays about square however many channels there are.
+ * Blocks go in a spiral from the middle; each district (a path prefix) takes the next blocks, the main
+ * street's first, the rest by name, and packs its houses onto them by name, as the sidebar lists them.
+ * So the same board is the same city every time, and a new channel moves only the houses after it in its
+ * district. `here` is the house you've walked into, where you stand.
  */
-export function townOf(state: State, now: number, columns: number, options: { here?: string | null } = {}): Town {
-  const rowWidth = Math.max(1, Math.floor(columns)) * LOT.width
+export function townOf(state: State, now: number, options: { here?: string | null } = {}): Town {
   const channels = Object.keys(state.channels)
   // A channel the stream showed before the list did is a house all the same.
   for (const message of Object.values(state.messages)) if (!channels.includes(message.channel)) channels.push(message.channel)
@@ -143,20 +178,51 @@ export function townOf(state: State, now: number, columns: number, options: { he
   for (const one of placed) if (one.thread !== null) occupied.set(one.thread, (occupied.get(one.thread) ?? 0) + 1)
 
   const streets: Street[] = []
+  const blocks: Block[] = []
   const houses: House[] = []
-  let y = 0
+  let next = 0
+  // The other half of a block a small district took half of: the next small district's.
+  let spare: { x: number; y: number } | null = null
   for (const name of names) {
-    const top = y
-    // A row at a time: as many houses as fit, standing on the row's front line.
+    const district = name === '' ? 'main street' : name
+    const sizes = byStreet.get(name)!.map((channel) => sizeOf((threads.get(channel) ?? []).length))
+    // A district whose houses fit in one row takes half a block.
+    const small =
+      sizes.reduce((sum, size) => sum + size.width, 0) + GAP.x * (sizes.length - 1) <= BLOCK.width - 2 * INSET &&
+      Math.max(...sizes.map((size) => size.depth)) + PLATE <= HALF - 2 * INSET
+    // A block, the next of the spiral: x across and y down, in the layout's pixels.
+    const take = (): Block => {
+      const { bx, by } = spiral(next++)
+      const block = { x: bx * (BLOCK.width + ROAD), y: by * (BLOCK.depth + ROAD), depth: BLOCK.depth, district }
+      blocks.push(block)
+      return block
+    }
+    const half = (): Block => {
+      let at = spare
+      if (at) spare = null
+      else {
+        const { bx, by } = spiral(next++)
+        at = { x: bx * (BLOCK.width + ROAD), y: by * (BLOCK.depth + ROAD) }
+        spare = { x: at.x, y: at.y + HALF + PATH }
+      }
+      const block = { x: at.x, y: at.y, depth: HALF, district }
+      blocks.push(block)
+      return block
+    }
+    let block = small ? half() : take()
+    streets.push({ name: district, x: block.x, y: block.y })
+    // A row at a time: as many houses as fit across the block, standing on the row's front line.
     let row: House[] = []
-    let x = SIGN
+    let x = block.x + INSET
+    let top = block.y + INSET
+    const deepest = () => Math.max(0, ...row.map((h) => h.depth))
     const close = () => {
-      const deepest = Math.max(...row.map((h) => h.depth))
-      for (const house of row) house.y = y + deepest - house.depth
+      const depth = deepest()
+      for (const house of row) house.y = top + depth - house.depth
       houses.push(...row)
-      y += deepest + PLATE + GAP.y
+      top += depth + PLATE + GAP.y / 2
       row = []
-      x = SIGN
+      x = block.x + INSET
     }
     for (const channel of byStreet.get(name)!) {
       // Sized by its threads the page knows: a board's own count of a channel's threads includes messages no one
@@ -164,7 +230,15 @@ export function townOf(state: State, now: number, columns: number, options: { he
       const known = threads.get(channel) ?? []
       const count = known.length
       const size = sizeOf(count)
-      if (row.length > 0 && x + size.width > SIGN + rowWidth) close()
+      const right = block.x + BLOCK.width - INSET
+      const bottom = block.y + block.depth - INSET
+      if (row.length > 0 && (x + size.width > right || top + Math.max(deepest(), size.depth) + PLATE > bottom)) close()
+      // A row that doesn't fit on what's left of the block starts the district's next block.
+      if (row.length === 0 && top + size.depth + PLATE > bottom) {
+        block = take()
+        x = block.x + INSET
+        top = block.y + INSET
+      }
       // Threads with someone at them get a table first, then the latest.
       const ranked = [...known].sort((a, b) => (occupied.get(b.thread) ?? 0) - (occupied.get(a.thread) ?? 0) || (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
       row.push({
@@ -183,7 +257,6 @@ export function townOf(state: State, now: number, columns: number, options: { he
       x += size.width + GAP.x
     }
     if (row.length > 0) close()
-    streets.push({ name: name === '' ? 'main street' : name, y: top, depth: y - top })
   }
   // Each table's place, now its house's is known: in the house's grid, the latest first.
   for (const house of houses) {
@@ -241,8 +314,11 @@ export function townOf(state: State, now: number, columns: number, options: { he
   }
   // Drawn in a steady order, so no one jumps in front of another when they move.
   residents.sort((a, b) => a.actor.localeCompare(b.actor))
-  const width = Math.max(SIGN + rowWidth, ...houses.map((h) => h.x + h.width))
-  return { streets, houses, residents, width, height: Math.max(y, LOT.height) }
+  const left = Math.min(0, ...blocks.map((b) => b.x))
+  const top = Math.min(0, ...blocks.map((b) => b.y))
+  const right = Math.max(BLOCK.width, ...blocks.map((b) => b.x + BLOCK.width))
+  const bottom = Math.max(BLOCK.depth, ...blocks.map((b) => b.y + b.depth))
+  return { streets, blocks, houses, residents, left, top, width: right - left, height: bottom - top }
 }
 
 /** Where a house's `n`th table stands, in its grid of `columns`, a cell to each. */

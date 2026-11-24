@@ -668,6 +668,8 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
 /* A label sits at its point: the scene moves it there each frame, and its content hangs above it. */
 .town-labels .over { position: absolute; left: 0; top: 0; will-change: transform; }
 .town-labels .over > * { position: absolute; left: 0; bottom: 0; width: max-content; transform: translateX(-50%); }
+/* A label under its point instead: a table's, below its near edge. */
+.town-labels .over.below > * { bottom: auto; top: 0; }
 .town-labels button { pointer-events: auto; }
 .town .plate {
   display: flex;
@@ -679,13 +681,18 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
   color: var(--bright);
   font-size: 12px;
   white-space: nowrap;
+  /* A long channel name is cut short: its sign stays about its house's width. Its title has it in full. */
+  max-width: 170px;
 }
+.town .plate .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .town .plate:hover, .town .plate.open { border-color: var(--bright); }
+.town .street-sign { display: block; padding: 2px 10px; background: var(--bright); color: var(--bg); font-size: 12px; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; }
 .town .plate.open .name { text-decoration: underline; text-underline-offset: 3px; }
 .town .plate .count { padding: 0 5px; background: var(--bright); color: var(--bg); font-size: 10px; line-height: 16px; }
 .town .table-label button {
   display: grid;
-  max-width: 150px;
+  /* Narrower than the room between two tables, so neighbors' labels both fit. */
+  max-width: 118px;
   padding: 1px 6px;
   background: var(--bg);
   border: 1px solid var(--ink);

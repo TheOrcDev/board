@@ -26,7 +26,7 @@ import {
   type Material,
   type Object3D,
 } from 'three'
-import { LOT, PLATE, ROOFS, roofOf, WALL as WALL_THICK, type House, type Resident, type Town } from './town.ts'
+import { BLOCK, ROAD, ROOFS, roofOf, WALL as WALL_THICK, type House, type Resident, type Town } from './town.ts'
 
 // Boardville in three dimensions. The village's layout is town.ts's, in its pixels: x across, y down
 // the page, which is z here, with y up. This only draws it: houses with roofs that lift off the one
@@ -41,8 +41,10 @@ const FOV = 32
 const PACE = 300
 /** People, to the scale of the houses. */
 const FIGURE_SCALE = 1.6
-/** The farthest the camera starts: a big village is seen a street or so at a time, and you move around it. */
-const FAR_HOUSES = 6
+/** The farthest the camera starts: a big city is seen a couple of blocks at a time, and you move around it. */
+const FAR_BLOCKS = 2.2
+/** Farther than this, only the signs of houses with people or tasks show: the rest are too many to read. */
+const QUIET_SIGNS = 4500
 
 type Palette = { sky: string; ground: string; street: string; walls: string; floor: string; table: string; chair: string; ink: string; lit: string; window: string; smoke: string; bright: string; roofs: string[] }
 
@@ -204,6 +206,12 @@ export class World {
     if (this.town) this.show(this.town, this.aimed ?? null, new Set())
   }
 
+  /** Whether a resident is sitting in their seat, in sight: their table's pill names them, so they need none of their own. */
+  settled(actor: string): boolean {
+    const person = this.people.get(actor)
+    return !!person && person.group.visible && person.path.length === 0 && person.seated
+  }
+
   /** Where a resident's head is now, mid-walk included, for their label; null while they're out of sight. */
   personAt(actor: string): Vector3 | null {
     const person = this.people.get(actor)
@@ -214,9 +222,9 @@ export class World {
   /** Brings the scene to `town`, with `open` the house you're in and `lit` the houses with someone awake. */
   show(town: Town, open: string | null, lit: Set<string>) {
     this.town = town
-    this.ground.scale.set(town.width + 6000, town.height + 6000, 1)
-    this.ground.position.set(town.width / 2, 0, town.height / 2)
-    this.drawStreets(town)
+    this.ground.scale.set(town.width + 8000, town.height + 8000, 1)
+    this.ground.position.set(town.left + town.width / 2, 0, town.top + town.height / 2)
+    this.drawCity(town)
     const seen = new Set<string>()
     for (const house of town.houses) {
       seen.add(house.channel)
@@ -331,8 +339,8 @@ export class World {
       this.distanceGoal = this.fit(house.width + 120, house.depth + 160)
     } else {
       const whole = this.fit(town.width + 80, town.height + 120)
-      const near = this.fit(FAR_HOUSES * LOT.width, FAR_HOUSES * LOT.height * 0.6)
-      if (whole <= near) this.lookGoal.set(town.width / 2 + 40, 0, town.height / 2)
+      const near = this.fit(FAR_BLOCKS * BLOCK.width, FAR_BLOCKS * BLOCK.depth)
+      if (whole <= near) this.lookGoal.set(town.left + town.width / 2, 0, town.top + town.height / 2)
       else {
         // Too big to read whole: start over the house with the most people in it, and let them move around.
         const busiest = [...town.houses].sort((a, b) => b.who.length - a.who.length || Number(b.busy) - Number(a.busy))[0]!
@@ -447,11 +455,12 @@ export class World {
       const p = at.project(this.camera)
       const x = ((p.x + 1) / 2) * width
       const y = ((1 - p.y) / 2) * height
-      let shown = !(p.z > 1 || p.x < -1.2 || p.x > 1.2 || p.y < -1.2 || p.y > 1.2)
+      let shown = !(p.z > 1 || p.x < -1.2 || p.x > 1.2 || p.y < -1.2 || p.y > 1.2) && !(label.rank === 0 && this.distance > QUIET_SIGNS)
       if (shown) {
-        // A label hangs above its point, centered on it.
+        // A label hangs above its point, centered on it, or below it.
         const size = this.sizeOf(element)
-        const box = { left: x - size.width / 2 - 3, right: x + size.width / 2 + 3, top: y - size.height - 2, bottom: y + 2 }
+        const below = element.classList.contains('below')
+        const box = { left: x - size.width / 2 - 3, right: x + size.width / 2 + 3, top: below ? y - 2 : y - size.height - 2, bottom: below ? y + size.height + 2 : y + 2 }
         if (label.rank !== undefined) shown = !taken.some((t) => box.left < t.right && box.right > t.left && box.top < t.bottom && box.bottom > t.top)
         if (shown) taken.push(box)
       }
@@ -528,18 +537,22 @@ export class World {
 
   // --- building things ----------------------------------------------------------------------
 
-  /** A road in front of each row of houses, past their signs. */
-  private drawStreets(town: Town) {
+  /** The city's roads, and on them each block, a slab of grass its houses stand on. */
+  private drawCity(town: Town) {
     for (const child of [...this.streets.children]) {
       child.removeFromParent()
       dispose(child)
     }
-    const material = new MeshStandardMaterial({ color: this.palette.street, roughness: 1 })
-    for (const front of new Set(town.houses.map((h) => h.y + h.depth))) {
-      const road = new Mesh(new BoxGeometry(town.width + 400, 1, 34), material)
-      road.position.set(town.width / 2, 0.5, front + PLATE + 26)
-      road.receiveShadow = true
-      this.streets.add(road)
+    const road = new Mesh(new BoxGeometry(town.width + 2 * ROAD, 1, town.height + 2 * ROAD), new MeshStandardMaterial({ color: this.palette.street, roughness: 1 }))
+    road.position.set(town.left + town.width / 2, 0.5, town.top + town.height / 2)
+    road.receiveShadow = true
+    this.streets.add(road)
+    const grass = new MeshStandardMaterial({ color: this.palette.ground, roughness: 1 })
+    for (const block of town.blocks) {
+      const slab = new Mesh(new BoxGeometry(BLOCK.width, 2, block.depth), grass)
+      slab.position.set(block.x + BLOCK.width / 2, 1, block.y + block.depth / 2)
+      slab.receiveShadow = true
+      this.streets.add(slab)
     }
   }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { MessageView, TaskView } from '../src/api/routes.ts'
 import * as store from '../src/inspect/app/store.ts'
-import { BUBBLE_MS, GONE_MS, IDLE_MS, sizeOf, townOf } from '../src/inspect/app/town.ts'
+import { BLOCK, BUBBLE_MS, GONE_MS, IDLE_MS, sizeOf, spiral, townOf } from '../src/inspect/app/town.ts'
 
 const ME = 'vercel:user:u_julian'
 const ADA = 'vercel:user:u_ada'
@@ -58,25 +58,61 @@ const discussion = (id: number, by: string, channel: string, overrides: Partial<
 ]
 
 describe('boardville', () => {
-  it('puts each channel in a house on its street: the main street first, then each path prefix, wrapping where a row is full', () => {
+  it('puts each district on blocks of its own: the main street in the middle, wrapping rows within a block', () => {
     const channels = ['www/production', 'dev', 'www/errors', 'deploys', 'www/preview']
-    // Three threads in each: standard houses, two to a row two standard houses wide.
+    // Three threads in each: standard houses, two to a row across a block.
     const threads = channels.flatMap((channel, c) => [1, 2, 3].flatMap((n) => discussion(c * 10 + n, ADA, channel)))
-    const town = townOf(stateOf(channels, threads), NOW, 2)
+    const town = townOf(stateOf(channels, threads), NOW)
     expect(town.streets.map((s) => s.name)).toEqual(['main street', 'www'])
+    expect(town.blocks.map((b) => b.district)).toEqual(['main street', 'www'])
     const house = (channel: string) => town.houses.find((h) => h.channel === channel)!
+    const blockOf = (channel: string) => town.blocks.find((b) => house(channel).x >= b.x && house(channel).x < b.x + BLOCK.width && house(channel).y >= b.y && house(channel).y < b.y + b.depth)!
+    // The main street is on the middle block.
+    expect(blockOf('dev')).toMatchObject({ x: 0, y: 0, district: 'main street' })
+    expect(blockOf('www/errors').district).toBe('www')
     expect(house('deploys').y).toBe(house('dev').y)
-    expect(house('www/errors').y).toBeGreaterThan(house('dev').y)
-    // A third house on a full row goes on the street's next row, under the first.
+    // A third house on a full row goes on the block's next row, under the first.
     expect(house('www/production').x).toBe(house('www/errors').x)
     expect(house('www/production').y).toBeGreaterThan(house('www/errors').y)
+    expect(blockOf('www/production')).toBe(blockOf('www/errors'))
     expect(house('www/errors').name).toBe('errors')
+  })
+
+  it('walks blocks in a square spiral out from the middle, each number one block', () => {
+    const blocks = Array.from({ length: 25 }, (_, n) => spiral(n))
+    expect(blocks[0]).toEqual({ bx: 0, by: 0 })
+    expect(new Set(blocks.map((b) => `${b.bx},${b.by}`)).size).toBe(25)
+    // The first nine are the middle and the ring around it; the next sixteen, the ring around that.
+    expect(blocks.slice(0, 9).every((b) => Math.max(Math.abs(b.bx), Math.abs(b.by)) <= 1)).toBe(true)
+    expect(blocks.slice(9).every((b) => Math.max(Math.abs(b.bx), Math.abs(b.by)) === 2)).toBe(true)
+    // Each block is next to the one before it.
+    for (let n = 1; n < 25; n++) expect(Math.abs(blocks[n]!.bx - blocks[n - 1]!.bx) + Math.abs(blocks[n]!.by - blocks[n - 1]!.by)).toBeLessThanOrEqual(2)
+  })
+
+  it('puts a district whose houses fit in one row on half a block, and the next small one on the other half', () => {
+    const town = townOf(stateOf(['alpha/one', 'alpha/two', 'beta/one', 'gamma/one'], []), NOW)
+    const [main, alpha, beta, gamma] = [undefined, ...town.blocks]
+    expect(main).toBeUndefined()
+    expect(alpha!.depth).toBeLessThan(BLOCK.depth / 2)
+    // Beta shares alpha's block, under it; gamma starts the next block.
+    expect(beta).toMatchObject({ x: alpha!.x, district: 'beta' })
+    expect(beta!.y).toBeGreaterThan(alpha!.y)
+    const inAlphasBlock = gamma!.x === alpha!.x && gamma!.y >= alpha!.y && gamma!.y < alpha!.y + BLOCK.depth
+    expect(inAlphasBlock).toBe(false)
+  })
+
+  it('keeps a city of many channels about square', () => {
+    const channels = Array.from({ length: 200 }, (_, i) => `probe-${String(i).padStart(3, '0')}`)
+    const town = townOf(stateOf(channels, []), NOW)
+    expect(town.houses).toHaveLength(200)
+    expect(town.width / town.height).toBeGreaterThan(0.6)
+    expect(town.width / town.height).toBeLessThan(1.7)
   })
 
   it('grows a house with its threads, in steps, up to a hall of sixteen tables', () => {
     const house = (threads: number) => {
       const roots = Array.from({ length: threads }, (_, i) => discussion(i + 1, ADA, 'dev')).flat()
-      return townOf(stateOf(['dev'], roots), NOW, 4).houses[0]!
+      return townOf(stateOf(['dev'], roots), NOW).houses[0]!
     }
     expect(house(0).width).toBeLessThan(house(2).width)
     expect(house(4).depth).toBeGreaterThan(house(2).depth)
@@ -88,38 +124,39 @@ describe('boardville', () => {
   })
 
   it('stands houses of one row on one front line, facing their street', () => {
-    const big = Array.from({ length: 9 }, (_, i) => discussion(i + 1, ADA, 'dev')).flat()
-    const town = townOf(stateOf(['dev', 'prs'], [...big, ...discussion(50, ADA, 'prs')]), NOW, 4)
+    // A hall of six tables and a cottage, side by side on the main street's block.
+    const big = Array.from({ length: 5 }, (_, i) => discussion(i + 1, ADA, 'dev')).flat()
+    const town = townOf(stateOf(['dev', 'prs'], big), NOW)
     const [dev, prs] = town.houses
     expect(dev!.depth).toBeGreaterThan(prs!.depth)
     expect(dev!.y + dev!.depth).toBe(prs!.y + prs!.depth)
   })
 
   it('makes a house of a channel only the stream has shown', () => {
-    const town = townOf(stateOf([], [message(1, ADA, 'incidents')]), NOW, 4)
+    const town = townOf(stateOf([], [message(1, ADA, 'incidents')]), NOW)
     expect(town.houses.map((h) => h.channel)).toEqual(['incidents'])
   })
 
   it('stands everyone at the house of their newest message, and moves them when they post elsewhere', () => {
     const before = stateOf(['dev', 'prs'], [message(1, ADA, 'dev', { createdAt: ago(5 * 60_000) })])
-    expect(where(townOf(before, NOW, 4), ADA)?.channel).toBe('dev')
+    expect(where(townOf(before, NOW), ADA)?.channel).toBe('dev')
     const after = store.merge(before, [message(2, ADA, 'prs', { createdAt: ago(60_000) })])
-    expect(where(townOf(after, NOW, 4), ADA)?.channel).toBe('prs')
+    expect(where(townOf(after, NOW), ADA)?.channel).toBe('prs')
   })
 
   it('tells agents from people', () => {
-    const town = townOf(stateOf(['dev'], [message(1, ADA, 'dev'), message(2, FX, 'dev')]), NOW, 4)
+    const town = townOf(stateOf(['dev'], [message(1, ADA, 'dev'), message(2, FX, 'dev')]), NOW)
     expect(where(town, FX)?.agent).toBe(true)
     expect(where(town, ADA)?.agent).toBe(false)
   })
 
   it('keeps an agent at work in the house of the task it holds a live claim on', () => {
     const claimed = message(1, ADA, 'work', { task: task({ state: 'claimed', epoch: 1, claim: { actor: FX, until: new Date(NOW + 10 * 60_000).toISOString() } }) } as Partial<MessageView>)
-    const town = townOf(stateOf(['work', 'dev'], [claimed, message(2, FX, 'dev', { createdAt: ago(60_000) })]), NOW, 4)
+    const town = townOf(stateOf(['work', 'dev'], [claimed, message(2, FX, 'dev', { createdAt: ago(60_000) })]), NOW)
     expect(where(town, FX)).toMatchObject({ channel: 'work', working: true })
     expect(town.houses.find((h) => h.channel === 'work')?.tasks).toBe(1)
     // Once the lease runs out, the agent is back where it last posted.
-    const lapsed = townOf(stateOf(['work', 'dev'], [claimed, message(2, FX, 'dev', { createdAt: ago(60_000) })]), NOW + 20 * 60_000, 4)
+    const lapsed = townOf(stateOf(['work', 'dev'], [claimed, message(2, FX, 'dev', { createdAt: ago(60_000) })]), NOW + 20 * 60_000)
     expect(where(lapsed, FX)).toMatchObject({ channel: 'dev', working: false })
   })
 
@@ -128,33 +165,33 @@ describe('boardville', () => {
       message(1, ADA, 'dev', { text: 'first', createdAt: ago(60_000) }),
       message(2, FX, 'dev', { text: 'over to @[vercel:user:u_ada]', createdAt: ago(30_000) }),
     ])
-    const town = townOf(state, NOW, 4)
+    const town = townOf(state, NOW)
     expect(where(town, FX)?.bubble).toMatchObject({ id: '2', thread: '2' })
     expect(where(town, ADA)?.bubble).toBeNull()
-    expect(where(townOf(state, NOW + BUBBLE_MS, 4), FX)?.bubble).toBeNull()
+    expect(where(townOf(state, NOW + BUBBLE_MS), FX)?.bubble).toBeNull()
   })
 
   it('opens the thread a reply bubble belongs to', () => {
-    const town = townOf(stateOf(['dev'], [message(1, ADA, 'dev'), message(2, FX, 'dev', { re: '1', createdAt: ago(10_000) })]), NOW, 4)
+    const town = townOf(stateOf(['dev'], [message(1, ADA, 'dev'), message(2, FX, 'dev', { re: '1', createdAt: ago(10_000) })]), NOW)
     expect(where(town, FX)?.bubble?.thread).toBe('1')
   })
 
   it('dozes off whoever has been quiet an hour, and sends home whoever has been quiet a day', () => {
     const state = stateOf(['dev'], [message(1, ADA, 'dev', { createdAt: ago(0) })])
-    expect(where(townOf(state, NOW + IDLE_MS - 1, 4), ADA)?.idle).toBe(false)
-    expect(where(townOf(state, NOW + IDLE_MS + 1, 4), ADA)?.idle).toBe(true)
-    expect(where(townOf(state, NOW + GONE_MS + 1, 4), ADA)).toBeUndefined()
+    expect(where(townOf(state, NOW + IDLE_MS - 1), ADA)?.idle).toBe(false)
+    expect(where(townOf(state, NOW + IDLE_MS + 1), ADA)?.idle).toBe(true)
+    expect(where(townOf(state, NOW + GONE_MS + 1), ADA)).toBeUndefined()
   })
 
   it('stands you at the house you opened', () => {
     const state = stateOf(['dev', 'prs'], [message(1, ME, 'dev')])
-    expect(where(townOf(state, NOW, 4), ME)?.channel).toBe('dev')
-    expect(where(townOf(state, NOW, 4, { here: 'prs' }), ME)).toMatchObject({ channel: 'prs', you: true })
+    expect(where(townOf(state, NOW), ME)?.channel).toBe('dev')
+    expect(where(townOf(state, NOW, { here: 'prs' }), ME)).toMatchObject({ channel: 'prs', you: true })
   })
 
   it('says over a house who’s in it, the most recent first, and sends everyone in by its door', () => {
     const state = stateOf(['dev'], [message(1, ADA, 'dev', { createdAt: ago(60_000) }), message(2, FX, 'dev', { createdAt: ago(1000) })])
-    const town = townOf(state, NOW, 4)
+    const town = townOf(state, NOW)
     expect(town.houses[0]!.who.map((w) => [w.name, w.agent])).toEqual([
       ['vercel:user:u_ada+fx', true],
       ['vercel:user:u_ada', false],
@@ -172,7 +209,7 @@ describe('boardville', () => {
     // Ada last spoke in the oldest thread: it still gets a table, though sixteen are newer.
     const reply = message(99, ADA, 'dev', { re: '1', createdAt: ago(1000) })
     const state = stateOf(['dev'], [...threads.map((m) => ({ ...m, by: { ...m.by, actor: 'vercel:user:u_bob', principal: 'vercel:user:u_bob' } })), reply])
-    const house = townOf(state, NOW, 4).houses[0]!
+    const house = townOf(state, NOW).houses[0]!
     expect(house.tables).toHaveLength(16)
     expect(house.tables[0]!.thread).toBe('1')
     expect(house.tables[0]!.label).toBe('thread 1')
@@ -182,7 +219,7 @@ describe('boardville', () => {
 
   it('seats each resident at the table of the thread they were last in, and the rest inside the door', () => {
     const state = stateOf(['dev'], [message(1, ADA, 'dev', { createdAt: ago(60_000) }), message(2, FX, 'dev', { re: '1', createdAt: ago(30_000) })])
-    const town = townOf(state, NOW, 4, { here: 'dev' })
+    const town = townOf(state, NOW, { here: 'dev' })
     const table = town.houses[0]!.tables[0]!
     for (const actor of [ADA, FX]) {
       const seat = where(town, actor)!.inside
@@ -200,7 +237,7 @@ describe('boardville', () => {
 
   it('gives a table to a thread or a task, never to a message no one answered', () => {
     const lone = message(1, ADA, 'dev', { createdAt: ago(1000) })
-    const town = townOf(stateOf(['dev'], [lone, ...discussion(2, FX, 'dev')]), NOW, 4, { here: 'dev' })
+    const town = townOf(stateOf(['dev'], [lone, ...discussion(2, FX, 'dev')]), NOW, { here: 'dev' })
     expect(town.houses[0]!.tables.map((t) => t.thread)).toEqual(['2'])
     // Who wrote it stands in the room, at no table.
     expect(where(town, ADA)).toMatchObject({ seated: false })
@@ -208,7 +245,7 @@ describe('boardville', () => {
 
   it('sits an agent at work at its task’s table, and shows the task’s state on it', () => {
     const claimed = message(1, ADA, 'work', { task: task({ state: 'claimed', epoch: 1, claim: { actor: FX, until: new Date(NOW + 10 * 60_000).toISOString() } }) } as Partial<MessageView>)
-    const town = townOf(stateOf(['work'], [claimed, message(2, ADA, 'work', { createdAt: ago(1000) })]), NOW, 4)
+    const town = townOf(stateOf(['work'], [claimed, message(2, ADA, 'work', { createdAt: ago(1000) })]), NOW)
     expect(where(town, FX)?.thread).toBe('1')
     expect(town.houses[0]!.tables.find((t) => t.thread === '1')?.task).toBe('claimed')
   })
