@@ -34,10 +34,13 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
     if (!element) return
     const made = new World(element, (picked) => pick.current(picked), labels.current)
     world.current = made
-    const fit = () => element.clientHeight > 0 && setAspect(element.clientWidth / element.clientHeight)
+    // The streets fit the whole view, not the scene: walking into a house shrinks the scene to make
+    // room for its channel, and the village mustn't rearrange itself when it does.
+    const view = element.parentElement ?? element
+    const fit = () => view.clientHeight > 0 && setAspect(view.clientWidth / view.clientHeight)
     fit()
     const observer = new ResizeObserver(fit)
-    observer.observe(element)
+    observer.observe(view)
     const dark = matchMedia('(prefers-color-scheme: dark)')
     const repaint = () => made.repaint()
     dark.addEventListener('change', repaint)
