@@ -37,6 +37,10 @@ import { BLOCK, ROAD, ROOFS, roofOf, WALL as WALL_THICK, type House, type Reside
 const WALL = 46
 /** How thick a block's slab of grass is: houses and people stand on it. */
 const SLAB = 2
+/** Where the sun is, from what it lights. */
+export const SUN = new Vector3(-900, 1600, 900)
+/** The sun's shadow map: its texels, and how far it reaches each way from what's in view. */
+const SHADOW = { size: 2048, span: 2200 }
 const TILT = (50 * Math.PI) / 180
 const FOV = 32
 /** How fast people walk, in the layout's pixels a second. */
@@ -170,8 +174,8 @@ export class World {
     this.scene.add(new AmbientLight(0xffffff, 0.35))
     const sun = new DirectionalLight(0xffffff, 1.7)
     sun.castShadow = true
-    sun.shadow.mapSize.set(2048, 2048)
-    Object.assign(sun.shadow.camera, { left: -2200, right: 2200, top: 2200, bottom: -2200, near: 10, far: 6000 })
+    sun.shadow.mapSize.set(SHADOW.size, SHADOW.size)
+    Object.assign(sun.shadow.camera, { left: -SHADOW.span, right: SHADOW.span, top: SHADOW.span, bottom: -SHADOW.span, near: 10, far: 6000 })
     sun.shadow.bias = -0.0005
     this.scene.add(sun, sun.target)
     this.sun = sun
@@ -381,8 +385,7 @@ export class World {
     this.camera.position.set(this.look.x, this.look.y + Math.sin(TILT) * this.distance, this.look.z + Math.cos(TILT) * this.distance)
     this.camera.lookAt(this.look)
     // The sun's shadows cover what's in view, and the fog hides the village's far edge.
-    this.sun.target.position.copy(this.look)
-    this.sun.position.copy(this.look).add(new Vector3(-900, 1600, 900))
+    this.follow(this.look)
     const fog = this.scene.fog as Fog
     fog.near = this.distance * 1.3
     fog.far = this.distance * 3
@@ -440,6 +443,23 @@ export class World {
 
     this.renderer.render(this.scene, this.camera)
     this.place()
+  }
+
+  /**
+   * The sun over `at`, moved only in whole texels of its shadow map. A shadow map that slides by less than a
+   * texel as the camera moves draws every shadow's edge a little differently each frame, and they shimmer.
+   */
+  private follow(at: Vector3) {
+    // The map reaches as far as the camera sees, in doublings: a reach that changed every frame would shimmer too.
+    const span = SHADOW.span * 2 ** Math.max(0, Math.ceil(Math.log2((this.distance * 0.9) / SHADOW.span)))
+    const shadow = this.sun.shadow.camera
+    if (shadow.right !== span) {
+      Object.assign(shadow, { left: -span, right: span, top: span, bottom: -span, far: 6000 + span })
+      shadow.updateProjectionMatrix()
+    }
+    const target = onTexels(at, SUN, (span * 2) / SHADOW.size)
+    this.sun.target.position.copy(target)
+    this.sun.position.copy(target).add(SUN)
   }
 
   /** Moves each label over its point; one off the scene hides, and so does a ranked one that would overlap another. */
@@ -737,6 +757,21 @@ export class World {
     this.scene.add(group)
     return { group, body, materials, ring, at: at.clone(), path: [], place: at.clone(), door: door.clone(), facing: resident.facing, seated: resident.seated, agent: resident.agent, step: 0, channel: resident.channel, thread: resident.thread }
   }
+}
+
+/**
+ * The point nearest `at` that falls on whole texels of a shadow map `texel` wide, cast by a light at `sun` from
+ * what it lights: measured along the map's own axes, across and up as the light sees the ground.
+ */
+export function onTexels(at: Vector3, sun: Vector3, texel: number): Vector3 {
+  const along = sun.clone().negate().normalize()
+  const right = new Vector3().crossVectors(along, new Vector3(0, 1, 0)).normalize()
+  const up = new Vector3().crossVectors(right, along).normalize()
+  const snap = (axis: Vector3) => {
+    const d = at.dot(axis)
+    return axis.clone().multiplyScalar(Math.round(d / texel) * texel - d)
+  }
+  return at.clone().add(snap(right)).add(snap(up))
 }
 
 /** A hipped roof over a `w` by `h` house: four slopes from its eaves, `over` past the walls, up to a ridge `rise` high. */
