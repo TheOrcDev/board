@@ -88,15 +88,21 @@ type PersonThings = {
   materials: MeshStandardMaterial[]
   ring: Mesh
   at: Vector3
-  goal: Vector3
+  /** Where they walk to next, in order, each in a house or out on the street: the last is their place. */
+  path: Waypoint[]
+  /** Their place, and the door of its house, as the layout last gave them. */
+  place: Vector3
+  door: Vector3
   facing: number
   seated: boolean
   agent: boolean
   step: number
-  /** In a house with its roof on: once they've walked to its door, they go in and aren't seen. */
-  indoors: boolean
   channel: string
+  thread: string | null
 }
+
+/** A point someone walks to: inside a house, seen only while its roof is off, or out on the street, seen always. */
+type Waypoint = { to: Vector3; channel: string | null }
 
 /** A page element kept over a point of the scene: its anchor says where, each frame, or null to hide it. */
 export type Label = {
@@ -129,6 +135,8 @@ export class World {
   private sun: DirectionalLight
   /** The house the camera was last aimed at (null for the village), so a refresh leaves where you've moved it. */
   private aimed: string | null | undefined = undefined
+  /** Where the house the camera is on stood when it was aimed: if it moves or grows, the camera follows. */
+  private aimedAt = ''
   private drag: { x: number; y: number; moved: number } | null = null
   /** Whether you've moved the camera yourself: until you do, it follows where people are. */
   private steered = false
@@ -242,9 +250,9 @@ export class World {
     const here = new Set<string>()
     for (const resident of town.residents) {
       here.add(resident.actor)
-      const inside = resident.channel === open
-      const spot = inside ? resident.inside : resident.door
-      const goal = new Vector3(spot.x + 15, 0, spot.y + 15)
+      // Everyone has one place, whether or not you're looking: a roof only hides it.
+      const place = new Vector3(resident.inside.x + 15, 0, resident.inside.y + 15)
+      const door = new Vector3(resident.door.x + 15, 0, resident.door.y + 15)
       let person = this.people.get(resident.actor)
       if (person && person.agent !== resident.agent) {
         person.group.removeFromParent()
@@ -253,23 +261,30 @@ export class World {
       }
       if (!person) {
         // Someone new to the page is already where they are: no one walks in from nowhere.
-        person = this.figure(resident, goal)
-        person.indoors = !inside
+        person = this.figure(resident, place, door)
         this.people.set(resident.actor, person)
       } else if (person.channel !== resident.channel) {
-        // Off to another house: out of the door of the one they were in, and down the street.
-        person.indoors = false
+        // Off to another house: out of the door of the one they're in, down the street, and in at the other's.
+        person.path = [
+          { to: person.door.clone(), channel: person.channel },
+          { to: door.clone(), channel: null },
+          { to: place.clone(), channel: resident.channel },
+        ]
+      } else if (!person.place.equals(place)) {
+        // To another table in the same house.
+        person.path = [{ to: place.clone(), channel: resident.channel }]
       }
       person.channel = resident.channel
-      person.goal.copy(goal)
-      person.facing = inside ? resident.facing : 0
-      person.seated = inside && resident.seated
+      person.thread = resident.thread
+      person.place.copy(place)
+      person.door.copy(door)
+      person.facing = resident.facing
+      person.seated = resident.seated
       person.ring.visible = resident.you
       for (const material of person.materials) {
         material.transparent = resident.idle
         material.opacity = resident.idle ? 0.5 : 1
       }
-      if (inside) person.indoors = false
     }
     for (const [actor, person] of this.people)
       if (!here.has(actor)) {
@@ -280,7 +295,9 @@ export class World {
 
     // Walking in or out moves the camera, and so does the village filling in until you've moved it yourself;
     // otherwise a refresh leaves it where you put it.
-    if (open !== this.aimed || (open === null && !this.steered)) this.aim(town, open)
+    const spot = open ? town.houses.find((h) => h.channel === open) : undefined
+    const at = spot ? `${spot.x},${spot.y},${spot.width},${spot.depth}` : ''
+    if (open !== this.aimed || (open === null && !this.steered) || (spot && at !== this.aimedAt)) this.aim(town, open)
   }
 
   dispose() {
@@ -308,6 +325,7 @@ export class World {
 
   private aim(town: Town, open: string | null) {
     const house = open ? town.houses.find((h) => h.channel === open) : undefined
+    this.aimedAt = house ? `${house.x},${house.y},${house.width},${house.depth}` : ''
     if (house) {
       this.lookGoal.set(house.x + house.width / 2, 0, house.y + house.depth / 2 + 30)
       this.distanceGoal = this.fit(house.width + 120, house.depth + 160)
@@ -378,23 +396,34 @@ export class World {
     }
 
     for (const person of this.people.values()) {
-      const away = person.goal.clone().sub(person.at).setY(0)
-      const far = away.length()
-      const walking = !this.still && far > 0.5
-      if (walking) {
-        person.at.add(away.multiplyScalar(Math.min(1, (PACE * dt) / far)))
-        person.step += dt * 12
-        person.group.rotation.y = Math.atan2(person.goal.x - person.at.x, person.goal.z - person.at.z)
-      } else {
-        person.at.copy(person.goal)
-        person.step = 0
-        person.group.rotation.y += (person.facing - person.group.rotation.y) * (this.still ? 1 : 0.15)
-        // At the door of a house with its roof on: they go in.
-        const home = this.houses.get(person.channel)
-        if (home && !home.open) person.indoors = true
+      // Walk the path a leg at a time; with motion reduced, they're at its end at once.
+      if (this.still && person.path.length > 0) {
+        person.at.copy(person.path.at(-1)!.to)
+        person.path = []
       }
-      person.group.visible = !person.indoors
-      person.body.position.y = !walking && person.seated ? -9 : Math.abs(Math.sin(person.step)) * 4
+      const leg = person.path[0]
+      let walking = false
+      if (leg) {
+        const away = leg.to.clone().sub(person.at).setY(0)
+        const far = away.length()
+        if (far < 1) {
+          person.at.copy(leg.to)
+          person.path.shift()
+        } else {
+          walking = true
+          person.at.add(away.multiplyScalar(Math.min(1, (PACE * dt) / far)))
+          person.step += dt * 12
+          person.group.rotation.y = Math.atan2(leg.to.x - person.at.x, leg.to.z - person.at.z)
+        }
+      }
+      if (!walking) {
+        person.step = 0
+        person.group.rotation.y += (person.facing - person.group.rotation.y) * 0.15
+      }
+      // Out on the street they're seen; in a house, only while its roof is off.
+      const within = person.path.length > 0 ? person.path[0]!.channel : person.channel
+      person.group.visible = within === null || this.houses.get(within)?.open === true
+      person.body.position.y = !walking && person.path.length === 0 && person.seated ? -9 : Math.abs(Math.sin(person.step)) * 4
       person.group.position.set(person.at.x, 0, person.at.z)
     }
 
@@ -634,7 +663,7 @@ export class World {
   }
 
   /** A person, rounded, with hair and eyes; or an agent, boxy, with a screen for a face. Each in a color of their own. */
-  private figure(resident: Resident, at: Vector3): PersonThings {
+  private figure(resident: Resident, at: Vector3, door: Vector3): PersonThings {
     const group = new Group()
     const body = new Group()
     group.add(body)
@@ -688,7 +717,7 @@ export class World {
     group.scale.setScalar(FIGURE_SCALE)
     group.position.copy(at)
     this.scene.add(group)
-    return { group, body, materials, ring, at: at.clone(), goal: at.clone(), facing: 0, seated: false, agent: resident.agent, step: 0, indoors: false, channel: resident.channel }
+    return { group, body, materials, ring, at: at.clone(), path: [], place: at.clone(), door: door.clone(), facing: resident.facing, seated: resident.seated, agent: resident.agent, step: 0, channel: resident.channel, thread: resident.thread }
   }
 }
 

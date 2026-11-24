@@ -159,9 +159,10 @@ export function townOf(state: State, now: number, columns: number, options: { he
       x = SIGN
     }
     for (const channel of byStreet.get(name)!) {
+      // Sized by its threads the page knows: a board's own count of a channel's threads includes messages no one
+      // answered, which get no table.
       const known = threads.get(channel) ?? []
-      const counted = Object.hasOwn(state.channels, channel) ? state.channels[channel]!.threads : undefined
-      const count = Math.max(known.length, counted ?? 0)
+      const count = known.length
       const size = sizeOf(count)
       if (row.length > 0 && x + size.width > SIGN + rowWidth) close()
       // Threads with someone at them get a table first, then the latest.
@@ -174,7 +175,7 @@ export function townOf(state: State, now: number, columns: number, options: { he
         width: size.width,
         depth: size.depth,
         threads: count,
-        busy: known.some((t) => now - Date.parse(t.at) < BUBBLE_MS),
+        busy: messages.some((m) => m.channel === channel && now - Date.parse(m.createdAt) < BUBBLE_MS),
         tasks: open.get(channel) ?? 0,
         tables: ranked.slice(0, size.columns * size.rows).map((t) => ({ thread: t.thread, label: t.label, task: t.task, x: 0, y: 0, seated: 0, chairs: [] })),
         who: [],
@@ -264,18 +265,27 @@ function seatAt(table: Table, seat: number): Spot {
 
 type Busiest = { thread: string; at: string; label: string; task: TaskView['state'] | null }
 
-/** Each channel's threads, the latest active first: when each last heard anything, and what its root says. */
+/**
+ * Each channel's threads, the latest active first: when each last heard anything, and what its root says. A
+ * thread is a root with replies, or a task: a message no one has answered is only a message, and gets no table.
+ */
 function threadsBy(state: State, messages: MessageView[], now: number): Map<string, Busiest[]> {
   const latest = new Map<string, Busiest & { channel: string }>()
+  const answered = new Set<string>()
   for (const message of messages) {
     const thread = message.re ?? message.id
+    if (message.re !== null) answered.add(message.re)
     const known = latest.get(thread)
     if (!known || message.createdAt > known.at) latest.set(thread, { thread, channel: message.channel, at: message.createdAt, label: '', task: null })
   }
+  // A channel's listing knows replies the page hasn't loaded.
+  for (const [channel, listing] of Object.entries(state.listings))
+    for (const [root, row] of Object.entries(listing?.rows ?? {})) if (row.replies > 0 && latest.get(root)?.channel === channel) answered.add(root)
   const out = new Map<string, Busiest[]>()
   for (const t of latest.values()) {
     const root = state.messages[t.thread]
     const view = root && !root.deleted ? shown(state, t.thread) : undefined
+    if (!answered.has(t.thread) && !view?.task) continue
     const entry = { thread: t.thread, at: t.at, label: view ? firstLine(view.text, state) : '', task: view?.task ? stateNow(view.task, now) : null }
     out.set(t.channel, [...(out.get(t.channel) ?? []), entry])
   }

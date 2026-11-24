@@ -51,11 +51,17 @@ function stateOf(channels: string[], messages: MessageView[]): store.State {
 
 const where = (town: ReturnType<typeof townOf>, actor: string) => town.residents.find((r) => r.actor === actor)
 
+/** A thread: a root and a reply to it, both by `by`, written at once. */
+const discussion = (id: number, by: string, channel: string, overrides: Partial<MessageView> = {}) => [
+  message(id, by, channel, overrides),
+  message(id + 1000, by, channel, { ...overrides, text: 'a reply', re: String(id) }),
+]
+
 describe('boardville', () => {
   it('puts each channel in a house on its street: the main street first, then each path prefix, wrapping where a row is full', () => {
     const channels = ['www/production', 'dev', 'www/errors', 'deploys', 'www/preview']
     // Three threads in each: standard houses, two to a row two standard houses wide.
-    const threads = channels.flatMap((channel, c) => [1, 2, 3].map((n) => message(c * 10 + n, ADA, channel)))
+    const threads = channels.flatMap((channel, c) => [1, 2, 3].flatMap((n) => discussion(c * 10 + n, ADA, channel)))
     const town = townOf(stateOf(channels, threads), NOW, 2)
     expect(town.streets.map((s) => s.name)).toEqual(['main street', 'www'])
     const house = (channel: string) => town.houses.find((h) => h.channel === channel)!
@@ -69,7 +75,7 @@ describe('boardville', () => {
 
   it('grows a house with its threads, in steps, up to a hall of sixteen tables', () => {
     const house = (threads: number) => {
-      const roots = Array.from({ length: threads }, (_, i) => message(i + 1, ADA, 'dev'))
+      const roots = Array.from({ length: threads }, (_, i) => discussion(i + 1, ADA, 'dev')).flat()
       return townOf(stateOf(['dev'], roots), NOW, 4).houses[0]!
     }
     expect(house(0).width).toBeLessThan(house(2).width)
@@ -78,14 +84,12 @@ describe('boardville', () => {
     expect(house(13).tables).toHaveLength(13)
     expect(house(40).tables).toHaveLength(16)
     expect(house(40).width).toBe(house(16).width)
-    // A board that counts a channel's threads sizes its house by them, loaded or not.
-    const counted = { ...stateOf(['dev'], []), channels: { dev: { path: 'dev', threads: 9 } } }
-    expect(townOf(counted, NOW, 4).houses[0]!.width).toBe(sizeOf(9).width)
+    expect(house(9).width).toBe(sizeOf(9).width)
   })
 
   it('stands houses of one row on one front line, facing their street', () => {
-    const big = Array.from({ length: 9 }, (_, i) => message(i + 1, ADA, 'dev'))
-    const town = townOf(stateOf(['dev', 'prs'], [...big, message(50, ADA, 'prs')]), NOW, 4)
+    const big = Array.from({ length: 9 }, (_, i) => discussion(i + 1, ADA, 'dev')).flat()
+    const town = townOf(stateOf(['dev', 'prs'], [...big, ...discussion(50, ADA, 'prs')]), NOW, 4)
     const [dev, prs] = town.houses
     expect(dev!.depth).toBeGreaterThan(prs!.depth)
     expect(dev!.y + dev!.depth).toBe(prs!.y + prs!.depth)
@@ -164,7 +168,7 @@ describe('boardville', () => {
   })
 
   it('makes a house’s threads its tables: those with someone at them first, then the latest, each saying its root’s first line', () => {
-    const threads = Array.from({ length: 20 }, (_, i) => message(i + 1, `vercel:user:u_${i % 2}`, 'dev', { text: `thread ${i + 1}\nmore`, createdAt: ago((20 - i) * 60_000) }))
+    const threads = Array.from({ length: 20 }, (_, i) => discussion(i + 1, `vercel:user:u_${i % 2}`, 'dev', { text: `thread ${i + 1}\nmore`, createdAt: ago((20 - i) * 60_000) })).flat()
     // Ada last spoke in the oldest thread: it still gets a table, though sixteen are newer.
     const reply = message(99, ADA, 'dev', { re: '1', createdAt: ago(1000) })
     const state = stateOf(['dev'], [...threads.map((m) => ({ ...m, by: { ...m.by, actor: 'vercel:user:u_bob', principal: 'vercel:user:u_bob' } })), reply])
@@ -192,6 +196,14 @@ describe('boardville', () => {
     // You came in by the door: at no table.
     expect(where(town, ME)).toMatchObject({ thread: null })
     expect(where(town, ME)!.inside.y).toBeGreaterThan(table.y + 50)
+  })
+
+  it('gives a table to a thread or a task, never to a message no one answered', () => {
+    const lone = message(1, ADA, 'dev', { createdAt: ago(1000) })
+    const town = townOf(stateOf(['dev'], [lone, ...discussion(2, FX, 'dev')]), NOW, 4, { here: 'dev' })
+    expect(town.houses[0]!.tables.map((t) => t.thread)).toEqual(['2'])
+    // Who wrote it stands in the room, at no table.
+    expect(where(town, ADA)).toMatchObject({ seated: false })
   })
 
   it('sits an agent at work at its task’s table, and shows the task’s state on it', () => {

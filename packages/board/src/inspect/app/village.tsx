@@ -1,5 +1,5 @@
 import { Bot, Hammer, X } from 'lucide-react'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import { Vector3 } from 'three'
 import { here as hereWith, navigate, useNow } from './nav.tsx'
 import { type State } from './store.ts'
@@ -20,7 +20,6 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
   const host = useRef<HTMLDivElement>(null)
   const world = useRef<World | null>(null)
   const labels = useRef(new Map<string, Label>())
-  const [aspect, setAspect] = useState(1.6)
   const enter = (channel: string | null) => navigate(hereWith({ thread: null, params: { house: channel === house ? null : channel } }))
   const pick = useRef<(picked: Picked) => void>(() => {})
   pick.current = (picked) => {
@@ -34,27 +33,21 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
     if (!element) return
     const made = new World(element, (picked) => pick.current(picked), labels.current)
     world.current = made
-    // The streets fit the whole view, not the scene: walking into a house shrinks the scene to make
-    // room for its channel, and the village mustn't rearrange itself when it does.
-    const view = element.parentElement ?? element
-    const fit = () => view.clientHeight > 0 && setAspect(view.clientWidth / view.clientHeight)
-    fit()
-    const observer = new ResizeObserver(fit)
-    observer.observe(view)
     const dark = matchMedia('(prefers-color-scheme: dark)')
     const repaint = () => made.repaint()
     dark.addEventListener('change', repaint)
     return () => {
       dark.removeEventListener('change', repaint)
-      observer.disconnect()
       made.dispose()
       world.current = null
     }
   }, [])
 
   const count = Object.keys(state.channels).length
-  // As many standard houses to a row as keeps the village about the page's shape, seen whole.
-  const columns = Math.max(1, Math.min(count || 1, Math.round(Math.sqrt(((count || 1) * aspect * LOT.height) / LOT.width))))
+  // Rows a set number of standard houses wide, for a village a little wider than deep. It's set by the
+  // houses alone, never the page: a pane opening or the window resizing moves no house, and the camera
+  // pans and zooms to show what doesn't fit.
+  const columns = Math.max(2, Math.min(count || 1, Math.round(Math.sqrt(((count || 1) * 1.6 * LOT.height) / LOT.width))))
   const town = useMemo(() => townOf(state, now, columns, { here: house }), [state.messages, state.channels, state.actors, state.ops, state.me, now, columns, house])
   const lit = useMemo(() => new Set(town.residents.filter((r) => !r.idle).map((r) => r.channel)), [town])
   useEffect(() => world.current?.show(town, house, lit), [town, house, lit])
