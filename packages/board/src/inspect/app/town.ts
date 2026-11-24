@@ -89,7 +89,7 @@ export type House = {
   /** As many of its threads as it has room for: those with someone at them first, then the latest. */
   tables: Table[]
   /** Who's in it, the most recent first: what its roof says while it's on. */
-  who: { name: string; agent: boolean; idle: boolean }[]
+  who: { name: string; agent: boolean; idle: boolean; avatar: string | null }[]
 }
 
 /** A district: the houses of one path prefix, on blocks of their own; its sign stands at its first block's corner. */
@@ -158,7 +158,7 @@ export const streetOf = (path: string) => (path.includes('/') ? path.slice(0, pa
  * So the same board is the same city every time, and a new channel moves only the houses after it in its
  * district. `here` is the house you've walked into, where you stand.
  */
-export function townOf(state: State, now: number, options: { here?: string | null } = {}): Town {
+export function townOf(state: State, now: number, options: { here?: string | null; looking?: string | null } = {}): Town {
   const channels = Object.keys(state.channels)
   // A channel the stream showed before the list did is a house all the same.
   for (const message of Object.values(state.messages)) if (!channels.includes(message.channel)) channels.push(message.channel)
@@ -173,7 +173,7 @@ export function townOf(state: State, now: number, options: { here?: string | nul
     if (isTask(message) && ['ready', 'claimed', 'waiting', 'blocked'].includes(stateNow(message.task, now))) open.set(message.channel, (open.get(message.channel) ?? 0) + 1)
   const me = state.me?.actor
   // Most recent first, so a full table, or a roof's list, shows who's there now.
-  const placed = [...whereabouts(state, messages, now, options.here ?? null)].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+  const placed = [...whereabouts(state, messages, now, options.here ?? null, options.looking ?? null)].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
   const occupied = new Map<string, number>()
   for (const one of placed) if (one.thread !== null) occupied.set(one.thread, (occupied.get(one.thread) ?? 0) + 1)
 
@@ -239,8 +239,13 @@ export function townOf(state: State, now: number, options: { here?: string | nul
         x = block.x + INSET
         top = block.y + INSET
       }
-      // Threads with someone at them get a table first, then the latest.
-      const ranked = [...known].sort((a, b) => (occupied.get(b.thread) ?? 0) - (occupied.get(a.thread) ?? 0) || (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+      // Which threads get a table: those with someone at them first, then the latest. Where each stands: in
+      // the order they started, so a table never moves when someone sits down, or when its thread hears more.
+      const chosen = [...known]
+        .sort((a, b) => (occupied.get(b.thread) ?? 0) - (occupied.get(a.thread) ?? 0) || (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+        .slice(0, size.columns * size.rows)
+      const started = (thread: string) => state.messages[thread]?.createdAt ?? ''
+      const ranked = chosen.sort((a, b) => started(a.thread).localeCompare(started(b.thread)) || a.thread.localeCompare(b.thread, undefined, { numeric: true }))
       row.push({
         channel,
         name: channel.slice(channel.lastIndexOf('/') + 1),
@@ -251,7 +256,7 @@ export function townOf(state: State, now: number, options: { here?: string | nul
         threads: count,
         busy: messages.some((m) => m.channel === channel && now - Date.parse(m.createdAt) < BUBBLE_MS),
         tasks: open.get(channel) ?? 0,
-        tables: ranked.slice(0, size.columns * size.rows).map((t) => ({ thread: t.thread, label: t.label, task: t.task, x: 0, y: 0, seated: 0, chairs: [] })),
+        tables: ranked.map((t) => ({ thread: t.thread, label: t.label, task: t.task, x: 0, y: 0, seated: 0, chairs: [] })),
         who: [],
       })
       x += size.width + GAP.x
@@ -277,7 +282,7 @@ export function townOf(state: State, now: number, options: { here?: string | nul
     const actor = state.actors[one.actor]
     const name = actor ? actor.name : nameOf(state, one.actor)
     const idle = now - Date.parse(one.at) > IDLE_MS
-    house.who.push({ name: one.actor === me ? 'you' : name, agent: one.actor.includes('+'), idle })
+    house.who.push({ name: one.actor === me ? 'you' : name, agent: one.actor.includes('+'), idle, avatar: actor?.avatar ?? null })
     const table = one.thread === null ? undefined : house.tables.find((t) => t.thread === one.thread)
     let inside: Spot
     let sitting = false
@@ -377,10 +382,10 @@ type Whereabouts = Pick<Resident, 'actor' | 'channel' | 'thread' | 'at' | 'worki
 
 /**
  * Where each actor is: at the thread of their newest message, or of a task they hold a live claim
- * on, which keeps an agent at work where its task is. You stand where you're looking (`here`), once
- * you've walked into a house.
+ * on, which keeps an agent at work where its task is. You're where you're looking: in the house you've walked
+ * into (`here`), at the thread you have open (`looking`).
  */
-function* whereabouts(state: State, messages: MessageView[], now: number, here: string | null): Generator<Whereabouts> {
+function* whereabouts(state: State, messages: MessageView[], now: number, here: string | null, looking: string | null): Generator<Whereabouts> {
   const newest = new Map<string, MessageView>()
   const working = new Map<string, MessageView>()
   for (const message of messages) {
@@ -399,7 +404,11 @@ function* whereabouts(state: State, messages: MessageView[], now: number, here: 
     const channel = mine ? here : (task?.channel ?? said?.channel)
     if (!channel) continue
     // You come in by the door; an agent at work sits at its task's table; anyone else at their newest thread's.
-    const thread = mine ? null : task ? task.id : (said!.re ?? said!.id)
+    // You sit at the thread you're looking at, or else the one you last wrote in here; with neither, you stand
+    // inside the door. Anyone else sits where they last wrote, or at the task they're working.
+    const reading = looking && state.messages[looking]?.channel === here ? looking : null
+    const wrote = said && said.channel === here ? (said.re ?? said.id) : null
+    const thread = mine ? (reading ?? wrote) : task ? task.id : (said!.re ?? said!.id)
     // What they said shows over them only where they said it.
     const fresh = said && said.channel === channel && now - Date.parse(said.createdAt) < BUBBLE_MS ? shown(state, said.id) : undefined
     const bubble = fresh && fresh.text.trim() ? { id: fresh.id, thread: fresh.re ?? fresh.id, text: firstLine(fresh.text, state) } : null
@@ -408,6 +417,17 @@ function* whereabouts(state: State, messages: MessageView[], now: number, here: 
 }
 
 const newer = (a: MessageView, b: MessageView) => a.createdAt > b.createdAt || (a.createdAt === b.createdAt && a.id.localeCompare(b.id, undefined, { numeric: true }) > 0)
+
+/** As many names as fit over a table, then how many more: `glm, fx +2`. The pill's title has them all. */
+export function fitted(names: string[], room = 16): string {
+  const shown: string[] = []
+  for (const name of names) {
+    if (shown.length > 0 && [...shown, name].join(', ').length > room) break
+    shown.push(name)
+  }
+  const more = names.length - shown.length
+  return `${shown.join(', ')}${more > 0 ? ` +${more}` : ''}`
+}
 
 /** A house's roof color, the same for a channel every time: one of a few, by its name. */
 export function roofOf(channel: string): number {

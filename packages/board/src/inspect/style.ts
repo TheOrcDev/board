@@ -660,7 +660,7 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
   }
 }
 /* A house you're in: the scene keeps the top of the page, its channel the rest. */
-.town.inside { flex: 0 0 min(58%, 520px); border-bottom: 1px solid var(--hairline); }
+.town.inside { flex: 0 0 min(66%, 640px); border-bottom: 1px solid var(--hairline); }
 .town-inside { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .town-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .town .empty { position: relative; }
@@ -692,22 +692,25 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
 .town .plate .count { padding: 0 5px; background: var(--bright); color: var(--bg); font-size: 10px; line-height: 16px; }
 .town .table-label button {
   display: grid;
-  /* Narrower than the room between two tables, so neighbors' labels both fit. */
-  max-width: 118px;
-  padding: 1px 6px;
+  padding: 1px 4px;
   background: var(--bg);
   border: 1px solid var(--ink);
   color: var(--bright);
-  font-size: 10px;
+  font-size: 9.5px;
   line-height: 1.3;
   text-align: left;
 }
 .town .table-label button:hover { border-color: var(--bright); }
-.town .table-label .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A grid's items don't shrink past their text unless told: without this a long label runs over its neighbors. */
+.town .table-label button { overflow: hidden; }
+.town .table-label .label, .town .table-label .state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .town .table-label .state { color: var(--muted); font-size: 9px; }
 .town .table-label .state.claimed { color: #2f7fd8; }
 /* Names float as dark pills, as people's do in a virtual office: a dot says who's around. */
 .town .stack { display: grid; justify-items: center; gap: 4px; }
+/* A table's label, its pill, and what's said there are as wide as the table at most: the scene sets --fit as
+   the camera moves. The bubble wraps, the names cut short. */
+.town .over[data-span] .bubble, .town .over[data-span] .roof-pill, .town .over[data-span].table-label button { max-width: var(--fit, 160px); }
 .person-label .tag, .town .roof-pill {
   display: inline-flex;
   align-items: center;
@@ -724,10 +727,12 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
 .person-label .tag i, .town .roof-pill i { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid #9aa0a8; flex-shrink: 0; }
 .person-label .tag i.on, .town .roof-pill i.on { background: #3ccf6b; border-color: #3ccf6b; }
 .person-label.you .tag { background: #f4f4f4; color: #181a20; font-weight: 600; }
+.town .faces { display: inline-flex; }
+.town .faces img { width: 16px; height: 16px; border-radius: 50%; object-fit: cover; outline: 1.5px solid rgba(24, 26, 32, 0.88); }
+.town .faces img + img { margin-left: -5px; }
 .person-label.idle .tag { color: #b0b4ba; }
-.town .roof-pill { padding: 3px 10px 3px 8px; font-size: 12px; }
+.town .roof-pill { padding: 3px 10px 3px 8px; font-size: 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .town .roof-pill:hover { background: rgba(24, 26, 32, 1); }
-.town .roof-pill .more { color: #b0b4ba; }
 .bubble .who { display: block; color: var(--muted); font-size: 10px; }
 .bubble {
   position: relative;

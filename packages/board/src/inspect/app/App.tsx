@@ -225,7 +225,7 @@ export function App() {
         )}
         {current.view === 'tasks' && <Tasks state={state} now={now} lead={expand} where={where} known={known} />}
         {current.view === 'town' && (
-          <Town state={state} lead={expand} house={where.params.get('house') || null}>
+          <Town state={state} lead={expand} house={where.params.get('house') || null} thread={where.thread}>
             {where.params.get('house') && (
               <Channel key={where.params.get('house')!} channel={where.params.get('house')!} state={state} options={options} known={known} lead={null} filters={filters} />
             )}

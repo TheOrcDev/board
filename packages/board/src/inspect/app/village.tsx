@@ -1,10 +1,10 @@
 import { Bot, Hammer, X } from 'lucide-react'
-import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Vector3 } from 'three'
 import { here as hereWith, navigate, useNow } from './nav.tsx'
 import { type State } from './store.ts'
 import { World, type Label, type Picked } from './scene.ts'
-import { PLATE, townOf, type House, type Resident } from './town.ts'
+import { fitted, PLATE, townOf, type House, type Resident } from './town.ts'
 import { Header } from './ui.tsx'
 
 /**
@@ -14,8 +14,8 @@ import { Header } from './ui.tsx'
  * they were last in. Only the house you're in opens, so the page reads one channel in full, and the
  * rest from the feed.
  */
-export function Town(props: { state: State; lead: ReactNode; house: string | null; children?: ReactNode }) {
-  const { state, house } = props
+export function Town(props: { state: State; lead: ReactNode; house: string | null; thread: string | null; children?: ReactNode }) {
+  const { state, house, thread } = props
   const now = useNow(5_000)
   const host = useRef<HTMLDivElement>(null)
   const world = useRef<World | null>(null)
@@ -43,7 +43,7 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
     }
   }, [])
 
-  const town = useMemo(() => townOf(state, now, { here: house }), [state.messages, state.channels, state.actors, state.ops, state.me, now, house])
+  const town = useMemo(() => townOf(state, now, { here: house, looking: thread }), [state.messages, state.channels, state.actors, state.ops, state.me, now, house, thread])
   const lit = useMemo(() => new Set(town.residents.filter((r) => !r.idle).map((r) => r.channel)), [town])
   useEffect(() => world.current?.show(town, house, lit), [town, house, lit])
 
@@ -99,15 +99,15 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
                   )}
                   <button className="roof-pill" onClick={() => enter(h.channel)} title={`${h.who.map((w) => w.name).join(', ')} in #${h.channel}`}>
                     <i className={h.who.some((w) => !w.idle) ? 'on' : ''} />
-                    {h.who.slice(0, 3).map((w) => w.name).join(', ')}
-                    {h.who.length > 3 && <span className="more">+{h.who.length - 3}</span>}
+                    <Faces urls={h.who.map((w) => w.avatar)} />
+                    {fitted(h.who.map((w) => w.name), 26)}
                   </button>
                 </div>
               </div>
             ))}
           {open?.tables.map((table) => (
             // What the thread is, on its tabletop: under the faces of who sits behind it, and on no other table.
-            <div key={`table:${table.thread}`} className="over centered table-label" ref={over(`table:${table.thread}`, () => new Vector3(table.x + 70, 26, table.y + 17), table.seated > 0 ? 2 : 0)}>
+            <div key={`table:${table.thread}`} className="over centered table-label" data-span="140" ref={over(`table:${table.thread}`, () => new Vector3(table.x + 70, 26, table.y + 17), table.seated > 0 ? 2 : 0)}>
               <button onClick={() => navigate(hereWith({ thread: table.thread }))} title="open the thread">
                 <span className="label">{table.label || 'a thread'}</span>
                 {table.task && <span className={`state ${table.task}`}>{table.task}</span>}
@@ -120,7 +120,7 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
             const speaker = seated.find((r) => r.bubble)
             return (
               // Who sits at a table, in one pill over their heads, as a room's names show over it.
-              <div key={`seats:${table.thread}`} className="over" ref={over(`seats:${table.thread}`, () => new Vector3(table.x + 70, 86, table.y - 24))}>
+              <div key={`seats:${table.thread}`} className="over" data-span="160" ref={over(`seats:${table.thread}`, () => new Vector3(table.x + 70, 86, table.y - 24), 3)}>
                 <div className="stack">
                   {speaker && (
                     <button className="bubble" onClick={() => navigate(hereWith({ thread: speaker.bubble!.thread }))} title="open the thread">
@@ -130,8 +130,9 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
                   )}
                   <span className="roof-pill" title={seated.map((r) => r.name).join(', ')}>
                     <i className={seated.some((r) => !r.idle) ? 'on' : ''} />
-                    {seated.some((r) => r.agent) && <Bot size={11} strokeWidth={2} />}
-                    {seated.map((r) => (r.you ? 'you' : r.name)).join(', ')}
+                    <Faces urls={seated.map((r) => r.avatar)} />
+                    {!seated.some((r) => r.avatar) && seated.some((r) => r.agent) && <Bot size={11} strokeWidth={2} />}
+                    {fitted(seated.map((r) => (r.you ? 'you' : r.name)))}
                     {seated.some((r) => r.working) && <Hammer size={11} strokeWidth={2} />}
                   </span>
                 </div>
@@ -140,12 +141,26 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
           })}
           {town.residents.map((r) => (
             // Everyone on their feet, standing or walking, has a pill of their own; who's seated is in their table's.
-            <PersonLabel key={`person:${r.actor}`} resident={r} attach={over(`person:${r.actor}`, () => (world.current?.settled(r.actor) && r.channel === house ? null : (world.current?.personAt(r.actor) ?? null)))} />
+            <PersonLabel key={`person:${r.actor}`} resident={r} attach={over(`person:${r.actor}`, () => (world.current?.settled(r.actor) && r.channel === house ? null : (world.current?.personAt(r.actor) ?? null)), r.you ? 6 : 3)} />
           ))}
         </div>
       </div>
       {house && <section className="town-inside">{props.children}</section>}
     </>
+  )
+}
+
+/** Up to three people's pictures, overlapping a little, as a pill's faces; none for who has no picture. */
+function Faces({ urls }: { urls: (string | null)[] }) {
+  const [broken, setBroken] = useState<Set<string>>(() => new Set())
+  const shown = urls.filter((url): url is string => !!url && !broken.has(url)).slice(0, 3)
+  if (shown.length === 0) return null
+  return (
+    <span className="faces">
+      {shown.map((url) => (
+        <img key={url} src={url} alt="" referrerPolicy="no-referrer" onError={() => setBroken((known) => new Set(known).add(url))} />
+      ))}
+    </span>
   )
 }
 
@@ -161,7 +176,8 @@ function PersonLabel({ resident: r, attach }: { resident: Resident; attach: (ele
         )}
         <span className="tag" title={r.working ? 'working on a task here' : r.idle ? 'away' : undefined}>
           <i className={r.idle ? '' : 'on'} />
-          {r.agent && <Bot size={11} strokeWidth={2} />}
+          <Faces urls={[r.avatar]} />
+          {!r.avatar && r.agent && <Bot size={11} strokeWidth={2} />}
           {r.you ? 'you' : r.name}
           {r.working && <Hammer size={11} strokeWidth={2} />}
         </span>

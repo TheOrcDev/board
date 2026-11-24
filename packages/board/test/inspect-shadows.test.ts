@@ -1,6 +1,6 @@
 import { Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
-import { onTexels, SUN } from '../src/inspect/app/scene.ts'
+import { clip, LAYERS, onTexels, SUN } from '../src/inspect/app/scene.ts'
 
 // Boardville's sun follows the camera. Its shadow map must move in whole texels, or every shadow's edge is
 // drawn a little differently each frame the camera moves, and the shadows shimmer.
@@ -37,5 +37,26 @@ describe('the sun over boardville', () => {
     expect(seen).toContain(first)
     const unsnapped = new Set(Array.from({ length: 20 }, (_, i) => where(at.clone().add(new Vector3(i * 0.02, 0, 0)))))
     expect(unsnapped.size).toBe(20)
+  })
+})
+
+describe('the ground of boardville', () => {
+  // A 24-bit depth buffer tells two surfaces apart only as far apart as one step of it, which grows with the
+  // square of their distance from the camera and shrinks with its near plane. Closer than that, they fight,
+  // and the ground flickers as the camera moves.
+  const step = (near: number, far: number, z: number) => ((far - near) * z * z) / (far * near * 2 ** 24)
+  const gaps = [LAYERS.road - LAYERS.grass, LAYERS.slab - LAYERS.road, LAYERS.floor - LAYERS.slab]
+
+  it('keeps its layers further apart than the depth buffer can blur, at every zoom and as far as the fog', () => {
+    for (let distance = 320; distance <= 60_000; distance *= 1.25) {
+      const { near, far } = clip(distance)
+      // The camera sees the ground from nearer than it looks, out to where the fog hides it, at 3 times as far.
+      for (const z of [distance * 0.5, distance, distance * 3]) expect(step(near, far, z)).toBeLessThan(Math.min(...gaps) / 4)
+    }
+  })
+
+  it('would have flickered with a near plane fixed close by', () => {
+    // The near plane this had before, at the distance a big city is seen from: the layers were 1 unit apart.
+    expect(step(10, 30_000, 10_000)).toBeGreaterThan(0.5)
   })
 })

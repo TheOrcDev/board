@@ -35,8 +35,22 @@ import { BLOCK, ROAD, ROOFS, roofOf, WALL as WALL_THICK, type House, type Reside
 
 /** How high walls stand. */
 const WALL = 46
-/** How thick a block's slab of grass is: houses and people stand on it. */
-const SLAB = 2
+/**
+ * How high each layer of the ground stands: the grass around the city, its roads, the blocks' slabs of grass
+ * that houses and people stand on, and a house's floor. Far enough apart that the depth buffer always tells
+ * them apart (see `clip`), or the camera sees them fight, and the ground flickers.
+ */
+export const LAYERS = { grass: -6, road: 3, slab: 8, floor: 10 }
+const SLAB = LAYERS.slab
+
+/**
+ * The camera's near and far planes at `distance` from what it looks at: in proportion to it, so the depth
+ * buffer's precision follows the camera, where a near plane fixed close by spends it all on the first few units.
+ * The camera stands about 0.77 of its distance above the ground, so nothing comes nearer than a fifth of it.
+ */
+export function clip(distance: number): { near: number; far: number } {
+  return { near: Math.max(5, distance * 0.2), far: distance * 8 + 2000 }
+}
 /** Where the sun is, from what it lights. */
 export const SUN = new Vector3(-900, 1600, 900)
 /** The sun's shadow map: its texels, and how far it reaches each way from what's in view. */
@@ -176,7 +190,9 @@ export class World {
     sun.castShadow = true
     sun.shadow.mapSize.set(SHADOW.size, SHADOW.size)
     Object.assign(sun.shadow.camera, { left: -SHADOW.span, right: SHADOW.span, top: SHADOW.span, bottom: -SHADOW.span, near: 10, far: 6000 })
-    sun.shadow.bias = -0.0005
+    sun.shadow.bias = -0.0002
+    // Flat ground shadows itself in stripes that crawl as the sun moves; leaning each lookup off the surface stops it.
+    sun.shadow.normalBias = 2
     this.scene.add(sun, sun.target)
     this.sun = sun
 
@@ -229,7 +245,7 @@ export class World {
   show(town: Town, open: string | null, lit: Set<string>) {
     this.town = town
     this.ground.scale.set(town.width + 8000, town.height + 8000, 1)
-    this.ground.position.set(town.left + town.width / 2, 0, town.top + town.height / 2)
+    this.ground.position.set(town.left + town.width / 2, LAYERS.grass, town.top + town.height / 2)
     this.drawCity(town)
     const seen = new Set<string>()
     for (const house of town.houses) {
@@ -343,7 +359,8 @@ export class World {
     this.aimedAt = house ? `${house.x},${house.y},${house.width},${house.depth}` : ''
     if (house) {
       this.lookGoal.set(house.x + house.width / 2, 0, house.y + house.depth / 2 + 30)
-      this.distanceGoal = this.fit(house.width + 120, house.depth + 160)
+      // With room around it for the pills over the back row and the sign under its door.
+      this.distanceGoal = this.fit(house.width + 80, house.depth + 200)
     } else {
       const whole = this.fit(town.width + 80, town.height + 120)
       const near = this.fit(FAR_BLOCKS * BLOCK.width, FAR_BLOCKS * BLOCK.depth)
@@ -384,6 +401,11 @@ export class World {
     this.distance += (this.distanceGoal - this.distance) * ease
     this.camera.position.set(this.look.x, this.look.y + Math.sin(TILT) * this.distance, this.look.z + Math.cos(TILT) * this.distance)
     this.camera.lookAt(this.look)
+    const planes = clip(this.distance)
+    if (this.camera.near !== planes.near || this.camera.far !== planes.far) {
+      Object.assign(this.camera, planes)
+      this.camera.updateProjectionMatrix()
+    }
     // The sun's shadows cover what's in view, and the fog hides the village's far edge.
     this.follow(this.look)
     const fog = this.scene.fog as Fog
@@ -475,13 +497,26 @@ export class World {
         element.style.visibility = 'hidden'
         continue
       }
-      const p = at.project(this.camera)
+      // `project` changes the point it's given: a copy, so `at` stays where it is in the scene.
+      const p = at.clone().project(this.camera)
       const x = ((p.x + 1) / 2) * width
       const y = ((1 - p.y) / 2) * height
       let shown = !(p.z > 1 || p.x < -1.2 || p.x > 1.2 || p.y < -1.2 || p.y > 1.2) && !(label.rank === 0 && this.distance > QUIET_SIGNS)
+      // A label as wide as a stretch of the scene, a table's: as many pixels as that stretch spans at its point.
+      const span = Number(element.dataset.span)
+      let fit = Infinity
+      if (shown && span) {
+        const end = at.clone().add(new Vector3(span, 0, 0)).project(this.camera)
+        fit = Math.floor(((Math.abs(end.x - p.x) / 2) * width) * 0.94)
+        // The page caps what's in the label at it: a table's label, its pill, and what's said there.
+        if (element.style.getPropertyValue('--fit') !== `${fit}px`) element.style.setProperty('--fit', `${fit}px`)
+        // Too narrow to say anything: no label at all.
+        if (fit < 36) shown = false
+      }
       if (shown) {
         // A label hangs above its point, centered on it, or below it.
-        const size = this.sizeOf(element)
+        const natural = this.sizeOf(element)
+        const size = { width: Math.min(natural.width, fit), height: natural.height }
         const below = element.classList.contains('below')
         const centered = element.classList.contains('centered')
         const top = centered ? y - size.height / 2 : below ? y : y - size.height
@@ -568,14 +603,15 @@ export class World {
       child.removeFromParent()
       dispose(child)
     }
-    const road = new Mesh(new BoxGeometry(town.width + 2 * ROAD, 1, town.height + 2 * ROAD), new MeshStandardMaterial({ color: this.palette.street, roughness: 1 }))
-    road.position.set(town.left + town.width / 2, 0.5, town.top + town.height / 2)
+    const thick = LAYERS.road - LAYERS.grass
+    const road = new Mesh(new BoxGeometry(town.width + 2 * ROAD, thick, town.height + 2 * ROAD), new MeshStandardMaterial({ color: this.palette.street, roughness: 1 }))
+    road.position.set(town.left + town.width / 2, LAYERS.grass + thick / 2, town.top + town.height / 2)
     road.receiveShadow = true
     this.streets.add(road)
     const grass = new MeshStandardMaterial({ color: this.palette.ground, roughness: 1 })
     for (const block of town.blocks) {
-      const slab = new Mesh(new BoxGeometry(BLOCK.width, SLAB, block.depth), grass)
-      slab.position.set(block.x + BLOCK.width / 2, SLAB / 2, block.y + block.depth / 2)
+      const slab = new Mesh(new BoxGeometry(BLOCK.width, SLAB - LAYERS.road, block.depth), grass)
+      slab.position.set(block.x + BLOCK.width / 2, (SLAB + LAYERS.road) / 2, block.y + block.depth / 2)
       slab.receiveShadow = true
       this.streets.add(slab)
     }
@@ -588,8 +624,9 @@ export class World {
     const group = new Group()
     group.userData.house = house.channel
     const walls = new MeshStandardMaterial({ color: p.walls, roughness: 0.9 })
-    const floor = new Mesh(new BoxGeometry(w - 2 * wall, 2, h - 2 * wall), new MeshStandardMaterial({ color: p.floor, roughness: 1 }))
-    floor.position.set(w / 2, 1, h / 2)
+    const lift = LAYERS.floor - LAYERS.slab
+    const floor = new Mesh(new BoxGeometry(w - 2 * wall, lift, h - 2 * wall), new MeshStandardMaterial({ color: p.floor, roughness: 1 }))
+    floor.position.set(w / 2, lift / 2, h / 2)
     floor.receiveShadow = true
     group.add(floor)
     const door = 56

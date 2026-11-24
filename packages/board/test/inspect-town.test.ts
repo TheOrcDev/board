@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { MessageView, TaskView } from '../src/api/routes.ts'
 import * as store from '../src/inspect/app/store.ts'
-import { BLOCK, BUBBLE_MS, GONE_MS, IDLE_MS, sizeOf, spiral, townOf } from '../src/inspect/app/town.ts'
+import { BLOCK, BUBBLE_MS, fitted, GONE_MS, IDLE_MS, sizeOf, spiral, townOf } from '../src/inspect/app/town.ts'
 
 const ME = 'vercel:user:u_julian'
 const ADA = 'vercel:user:u_ada'
@@ -235,6 +235,26 @@ describe('boardville', () => {
     expect(where(town, ME)!.inside.y).toBeGreaterThan(table.y + 50)
   })
 
+  it('sits you at the thread you have open, or else the last one you wrote in, or by the door', () => {
+    const state = stateOf(['dev'], [...discussion(1, ADA, 'dev'), ...discussion(2, FX, 'dev'), ...discussion(3, ME, 'dev', { createdAt: ago(60_000) })])
+    // Looking at nothing, you sit where you last wrote.
+    expect(where(townOf(state, NOW, { here: 'dev' }), ME)).toMatchObject({ thread: '3', seated: true })
+    // Open a thread, and you sit at its table.
+    expect(where(townOf(state, NOW, { here: 'dev', looking: '2' }), ME)).toMatchObject({ thread: '2', seated: true })
+    // A thread in another house is nowhere here: you sit where you last wrote.
+    expect(where(townOf(stateOf(['dev', 'prs'], [...state.messages ? Object.values(state.messages) : [], ...discussion(9, ADA, 'prs')]), NOW, { here: 'dev', looking: '9' }), ME)?.thread).toBe('3')
+    // Never having written here, and looking at nothing, you stand inside the door.
+    expect(where(townOf(stateOf(['dev'], discussion(1, ADA, 'dev')), NOW, { here: 'dev' }), ME)).toMatchObject({ thread: null, seated: false })
+  })
+
+  it('keeps every table where it is when someone sits down at one', () => {
+    const state = stateOf(['dev'], [1, 2, 3, 4].flatMap((n) => discussion(n, ADA, 'dev', { createdAt: ago((10 - n) * 60_000) })))
+    const placed = (town: ReturnType<typeof townOf>) => Object.fromEntries(town.houses[0]!.tables.map((t) => [t.thread, [t.x, t.y]]))
+    const before = placed(townOf(state, NOW, { here: 'dev' }))
+    // You open the newest thread: it gets you at its table, and no table moves for it.
+    expect(placed(townOf(state, NOW, { here: 'dev', looking: '4' }))).toEqual(before)
+  })
+
   it('gives a table to a thread or a task, never to a message no one answered', () => {
     const lone = message(1, ADA, 'dev', { createdAt: ago(1000) })
     const town = townOf(stateOf(['dev'], [lone, ...discussion(2, FX, 'dev')]), NOW, { here: 'dev' })
@@ -248,5 +268,15 @@ describe('boardville', () => {
     const town = townOf(stateOf(['work'], [claimed, message(2, ADA, 'work', { createdAt: ago(1000) })]), NOW)
     expect(where(town, FX)?.thread).toBe('1')
     expect(town.houses[0]!.tables.find((t) => t.thread === '1')?.task).toBe('claimed')
+  })
+})
+
+describe('names over a table', () => {
+  it('shows as many as fit, then how many more', () => {
+    expect(fitted(['fx'])).toBe('fx')
+    expect(fitted(['glm', 'fx'])).toBe('glm, fx')
+    expect(fitted(['glm', 'pr-watch', 'vulns-agent'])).toBe('glm, pr-watch +1')
+    // One long name still shows, cut short by its pill.
+    expect(fitted(['vulns-agent-with-a-long-name', 'fx'])).toBe('vulns-agent-with-a-long-name +1')
   })
 })
