@@ -15,24 +15,36 @@ export const IDLE_MS = 60 * 60_000
 /** How long since someone was last active before they've gone home: off the map. */
 export const GONE_MS = 24 * 60 * 60_000
 
-/** A house, seen from above: its walls, and the floor inside them. */
-export const HOUSE = { width: 340, height: 340, wall: 10 }
-/** A house's lot: the house, its porch under it, and the sign under that. */
-export const LOT = { width: 430, height: HOUSE.height + 104, porch: HOUSE.height + 10, plate: HOUSE.height + 56 }
+/** A house's walls, and the room in front of them for its sign. */
+export const WALL = 10
+const FRONT = 70
+/** One table's share of a floor: the table, its chairs, and room to walk between. */
+export const CELL = { width: 170, depth: 132 }
+/** Room between two houses on a street, and between a row of houses and the street in front of it. */
+const GAP = { x: 70, y: 96 }
+/** Where a house's sign hangs, under its front wall. */
+export const PLATE = 44
 /** A street's sign, on the left of its first row. */
 export const SIGN = 132
-/** The tables a house has room for: its threads with the latest activity. */
-export const TABLES = 4
+/** A standard house's lot, which `columns` counts in. */
+export const LOT = { width: 2 * WALL + 2 * CELL.width + GAP.x, height: 2 * WALL + 2 * CELL.depth + FRONT + GAP.y }
 /** Seats at a table: three on each side. */
 export const SEATS = 6
-/** Who a porch shows, the most recent first; the rest are counted. */
-export const PORCH = 8
 
 const AVATAR = 30
-const STEP = 38
+const STEP = 40
 const TABLE = { width: 140, height: 34 }
-/** An avatar with its name under it. */
-const FIGURE = AVATAR + 14
+/** A seated figure, with its name over it. */
+const FIGURE = 46
+
+/**
+ * How big a house is for the threads it has: a cottage for a channel nothing has happened in, up to a
+ * hall of sixteen tables. It grows in steps, so a new thread seldom moves its street.
+ */
+export function sizeOf(threads: number): { columns: number; rows: number; width: number; depth: number } {
+  const [columns, rows] = threads === 0 ? [1, 1] : threads <= 2 ? [2, 1] : threads <= 4 ? [2, 2] : threads <= 6 ? [3, 2] : threads <= 9 ? [3, 3] : threads <= 12 ? [4, 3] : [4, 4]
+  return { columns, rows, width: 2 * WALL + columns * CELL.width, depth: 2 * WALL + rows * CELL.depth + FRONT }
+}
 
 export type Table = {
   /** The thread's root, by ID. */
@@ -43,6 +55,10 @@ export type Table = {
   y: number
   /** A task's state, for a thread that's a task. */
   task: TaskView['state'] | null
+  /** How many sit at it. */
+  seated: number
+  /** Its chairs: three on its far side, then three on its near side. */
+  chairs: Spot[]
 }
 
 export type House = {
@@ -51,16 +67,21 @@ export type House = {
   name: string
   x: number
   y: number
+  width: number
+  depth: number
+  /** How many threads it has, as far as the page knows: what its size is for. */
+  threads: number
   /** Whether someone said something in it within the last couple of minutes: its chimney smokes. */
   busy: boolean
   /** Its open tasks, as the loaded messages have them. */
   tasks: number
+  /** As many of its threads as it has room for: those with someone at them first, then the latest. */
   tables: Table[]
-  /** Everyone at it, the porch's overflow included. */
-  people: number
+  /** Who's in it, the most recent first: what its roof says while it's on. */
+  who: { name: string; agent: boolean; idle: boolean }[]
 }
 
-export type Street = { name: string; y: number; rows: number }
+export type Street = { name: string; y: number; depth: number }
 
 export type Spot = { x: number; y: number }
 
@@ -70,13 +91,17 @@ export type Resident = {
   avatar: string | null
   /** An agent: an actor with a profile, `claude via ada`. */
   agent: boolean
-  /** The house they're at, and the thread there they were last in. */
+  /** The house they're in, and the thread there they were last in. */
   channel: string
   thread: string | null
-  /** Where they stand while the house's roof is on: on its porch, or null when the porch is full. */
-  outside: Spot | null
-  /** Where they are once it's off: at their thread's table, or inside the door. */
+  /** The house's door: where they go in and come out, walking from one house to another. */
+  door: Spot
+  /** Where they are inside: at their thread's table, or inside the door. */
   inside: Spot
+  /** Sitting at a table, or standing. */
+  seated: boolean
+  /** Which way they face, in radians around the vertical: a seat faces its table, and standing faces the street. */
+  facing: number
   /** When they were last active. */
   at: string
   idle: boolean
@@ -93,12 +118,12 @@ export type Town = { streets: Street[]; houses: House[]; residents: Resident[]; 
 export const streetOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')
 
 /**
- * The village for `state` at `now`, `columns` houses to a row. Streets go by name, the main street
- * first; a street with more houses than a row holds wraps onto rows of its own. `here` is the house
- * you've walked into, where you stand.
+ * The village for `state` at `now`, a row about `columns` standard houses wide. Streets go by name,
+ * the main street first, and a street wraps onto rows of its own. Each row's houses stand with their
+ * fronts on one line, facing its street. `here` is the house you've walked into, where you stand.
  */
 export function townOf(state: State, now: number, columns: number, options: { here?: string | null } = {}): Town {
-  const cols = Math.max(1, Math.floor(columns))
+  const rowWidth = Math.max(1, Math.floor(columns)) * LOT.width
   const channels = Object.keys(state.channels)
   // A channel the stream showed before the list did is a house all the same.
   for (const message of Object.values(state.messages)) if (!channels.includes(message.channel)) channels.push(message.channel)
@@ -106,94 +131,125 @@ export function townOf(state: State, now: number, columns: number, options: { he
   for (const path of channels.sort()) byStreet.set(streetOf(path), [...(byStreet.get(streetOf(path)) ?? []), path])
   const names = [...byStreet.keys()].sort((a, b) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)))
 
-  const live = (message: MessageView) => !message.deleted
-  const messages = Object.values(state.messages).filter(live)
+  const messages = Object.values(state.messages).filter((message) => !message.deleted)
   const threads = threadsBy(state, messages, now)
   const open = new Map<string, number>()
   for (const message of messages)
     if (isTask(message) && ['ready', 'claimed', 'waiting', 'blocked'].includes(stateNow(message.task, now))) open.set(message.channel, (open.get(message.channel) ?? 0) + 1)
+  const me = state.me?.actor
+  // Most recent first, so a full table, or a roof's list, shows who's there now.
+  const placed = [...whereabouts(state, messages, now, options.here ?? null)].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+  const occupied = new Map<string, number>()
+  for (const one of placed) if (one.thread !== null) occupied.set(one.thread, (occupied.get(one.thread) ?? 0) + 1)
 
   const streets: Street[] = []
   const houses: House[] = []
   let y = 0
   for (const name of names) {
-    const paths = byStreet.get(name)!
-    const rows = Math.ceil(paths.length / cols)
-    streets.push({ name: name === '' ? 'main street' : name, y, rows })
-    paths.forEach((channel, i) => {
-      const hx = SIGN + (i % cols) * LOT.width
-      const hy = y + Math.floor(i / cols) * LOT.height
-      const latest = threads.get(channel) ?? []
-      houses.push({
+    const top = y
+    // A row at a time: as many houses as fit, standing on the row's front line.
+    let row: House[] = []
+    let x = SIGN
+    const close = () => {
+      const deepest = Math.max(...row.map((h) => h.depth))
+      for (const house of row) house.y = y + deepest - house.depth
+      houses.push(...row)
+      y += deepest + PLATE + GAP.y
+      row = []
+      x = SIGN
+    }
+    for (const channel of byStreet.get(name)!) {
+      const known = threads.get(channel) ?? []
+      const counted = Object.hasOwn(state.channels, channel) ? state.channels[channel]!.threads : undefined
+      const count = Math.max(known.length, counted ?? 0)
+      const size = sizeOf(count)
+      if (row.length > 0 && x + size.width > SIGN + rowWidth) close()
+      // Threads with someone at them get a table first, then the latest.
+      const ranked = [...known].sort((a, b) => (occupied.get(b.thread) ?? 0) - (occupied.get(a.thread) ?? 0) || (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+      row.push({
         channel,
         name: channel.slice(channel.lastIndexOf('/') + 1),
-        x: hx,
-        y: hy,
-        busy: latest.some((t) => now - Date.parse(t.at) < BUBBLE_MS),
+        x,
+        y: 0,
+        width: size.width,
+        depth: size.depth,
+        threads: count,
+        busy: known.some((t) => now - Date.parse(t.at) < BUBBLE_MS),
         tasks: open.get(channel) ?? 0,
-        tables: latest.slice(0, TABLES).map((t, n) => ({ thread: t.thread, label: t.label, task: t.task, ...tableAt(hx, hy, n) })),
-        people: 0,
+        tables: ranked.slice(0, size.columns * size.rows).map((t) => ({ thread: t.thread, label: t.label, task: t.task, x: 0, y: 0, seated: 0, chairs: [] })),
+        who: [],
       })
+      x += size.width + GAP.x
+    }
+    if (row.length > 0) close()
+    streets.push({ name: name === '' ? 'main street' : name, y: top, depth: y - top })
+  }
+  // Each table's place, now its house's is known: in the house's grid, the latest first.
+  for (const house of houses) {
+    const { columns } = sizeOf(house.threads)
+    house.tables.forEach((table, n) => {
+      Object.assign(table, tableAt(house, columns, n))
+      table.chairs = Array.from({ length: SEATS }, (_, seat) => seatAt(table, seat))
     })
-    y += rows * LOT.height
   }
 
   const houseOf = new Map(houses.map((house) => [house.channel, house]))
-  const porch = new Map<string, number>()
-  const seated = new Map<string, number>()
   const lobby = new Map<string, number>()
   const residents: Resident[] = []
-  const me = state.me?.actor
-  // Most recent first, so a full porch or table shows who's there now.
-  const placed = [...whereabouts(state, messages, now, options.here ?? null)].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
   const spoke = new Set<string>()
   for (const one of placed) {
     const house = houseOf.get(one.channel)
     if (!house) continue
-    house.people++
-    const onPorch = porch.get(one.channel) ?? 0
-    porch.set(one.channel, onPorch + 1)
-    const table = one.thread === null ? -1 : house.tables.findIndex((t) => t.thread === one.thread)
+    const actor = state.actors[one.actor]
+    const name = actor ? actor.name : nameOf(state, one.actor)
+    const idle = now - Date.parse(one.at) > IDLE_MS
+    house.who.push({ name: one.actor === me ? 'you' : name, agent: one.actor.includes('+'), idle })
+    const table = one.thread === null ? undefined : house.tables.find((t) => t.thread === one.thread)
     let inside: Spot
-    const seat = table === -1 ? SEATS : (seated.get(`${one.channel} ${table}`) ?? 0)
-    if (table !== -1 && seat < SEATS) {
-      seated.set(`${one.channel} ${table}`, seat + 1)
-      inside = seatAt(house.tables[table]!, seat)
+    let sitting = false
+    let facing = 0
+    if (table && table.seated < SEATS) {
+      // The far side's chairs fill first: they face the street, so you see faces, not backs.
+      const seat = table.seated
+      table.seated++
+      inside = table.chairs[seat]!
+      sitting = true
+      facing = seat < 3 ? 0 : Math.PI
     } else {
       // No table for their thread, or no seat left at it: they stand inside the door.
       const n = lobby.get(one.channel) ?? 0
       lobby.set(one.channel, n + 1)
-      inside = { x: house.x + HOUSE.width / 2 - AVATAR / 2 + ((n % 2 === 0 ? 1 : -1) * Math.ceil(n / 2) * STEP), y: house.y + HOUSE.height - HOUSE.wall - 52 - Math.floor(n / 6) * STEP }
+      inside = { x: house.x + house.width / 2 - AVATAR / 2 + (n % 2 === 0 ? 1 : -1) * Math.ceil(n / 2) * STEP, y: house.y + house.depth - WALL - 50 }
     }
-    const actor = state.actors[one.actor]
     // One bubble to a house, the newest speaker's, so a crowd's don't pile up.
     const bubble = one.bubble && !spoke.has(one.channel) ? one.bubble : null
     if (bubble) spoke.add(one.channel)
     residents.push({
       ...one,
       bubble,
-      name: actor ? actor.name : nameOf(state, one.actor),
+      name,
       avatar: actor?.avatar ?? null,
       agent: one.actor.includes('+'),
-      outside: onPorch < PORCH ? { x: house.x + 8 + onPorch * STEP, y: house.y + LOT.porch } : null,
+      door: { x: house.x + house.width / 2 - AVATAR / 2, y: house.y + house.depth + 6 },
       inside,
-      idle: now - Date.parse(one.at) > IDLE_MS,
+      seated: sitting,
+      facing,
+      idle,
       you: one.actor === me,
     })
   }
   // Drawn in a steady order, so no one jumps in front of another when they move.
   residents.sort((a, b) => a.actor.localeCompare(b.actor))
-  return { streets, houses, residents, width: SIGN + cols * LOT.width, height: Math.max(y, LOT.height) }
+  const width = Math.max(SIGN + rowWidth, ...houses.map((h) => h.x + h.width))
+  return { streets, houses, residents, width, height: Math.max(y, LOT.height) }
 }
 
-/** Where a house's `n`th table stands: two by two on its floor. */
-function tableAt(hx: number, hy: number, n: number): Spot {
-  const floor = { width: HOUSE.width - 2 * HOUSE.wall, height: HOUSE.height - 2 * HOUSE.wall - 70 }
-  const cell = { width: floor.width / 2, height: floor.height / 2 }
+/** Where a house's `n`th table stands, in its grid of `columns`, a cell to each. */
+function tableAt(house: House, columns: number, n: number): Spot {
   return {
-    x: hx + HOUSE.wall + (n % 2) * cell.width + (cell.width - TABLE.width) / 2,
-    // Its far side's seats between it and the wall, or the table above.
-    y: hy + HOUSE.wall + Math.floor(n / 2) * cell.height + FIGURE + 4,
+    x: house.x + WALL + (n % columns) * CELL.width + (CELL.width - TABLE.width) / 2,
+    // Its far side's chairs between it and the wall, or the row of tables behind it.
+    y: house.y + WALL + Math.floor(n / columns) * CELL.depth + FIGURE + 4,
   }
 }
 
@@ -202,7 +258,7 @@ function seatAt(table: Table, seat: number): Spot {
   const along = seat % 3
   return {
     x: table.x + (TABLE.width - 3 * STEP) / 2 + along * STEP + (STEP - AVATAR) / 2,
-    y: seat < 3 ? table.y - FIGURE - 2 : table.y + TABLE.height + 4,
+    y: seat < 3 ? table.y - FIGURE + 6 : table.y + TABLE.height + 2,
   }
 }
 

@@ -4,7 +4,7 @@ import { Vector3 } from 'three'
 import { here as hereWith, navigate, useNow } from './nav.tsx'
 import { type State } from './store.ts'
 import { World, type Label, type Picked } from './scene.ts'
-import { HOUSE, LOT, PORCH, townOf, type Resident } from './town.ts'
+import { LOT, PLATE, townOf, type House, type Resident } from './town.ts'
 import { Header } from './ui.tsx'
 
 /**
@@ -53,7 +53,7 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
   }, [])
 
   const count = Object.keys(state.channels).length
-  // As many houses to a row as keeps the village about the page's shape, seen whole.
+  // As many standard houses to a row as keeps the village about the page's shape, seen whole.
   const columns = Math.max(1, Math.min(count || 1, Math.round(Math.sqrt(((count || 1) * aspect * LOT.height) / LOT.width))))
   const town = useMemo(() => townOf(state, now, columns, { here: house }), [state.messages, state.channels, state.actors, state.ops, state.me, now, columns, house])
   const lit = useMemo(() => new Set(town.residents.filter((r) => !r.idle).map((r) => r.channel)), [town])
@@ -64,8 +64,10 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
     if (element) labels.current.set(key, { element, anchor, ...(rank === undefined ? {} : { rank }) })
     else labels.current.delete(key)
   }
-  /** Of two signs that would overlap, the one that shows: the house you're in, then one with people, then one with tasks. */
-  const rankOf = (h: (typeof town.houses)[number]) => (h.channel === house ? 3 : h.people > 0 ? 2 : h.tasks > 0 ? 1 : 0)
+  /** Of two labels that would overlap, the one that shows: who's in a house first, then the busiest houses' signs. */
+  const rankOf = (h: House) => (h.channel === house ? 5 : h.who.length > 0 ? 3 : h.tasks > 0 ? 1 : 0)
+  // What the newest speaker in a house said, for a house whose roof is on: it shows over the roof.
+  const said = new Map(town.residents.filter((r) => r.bubble).map((r) => [r.channel, r]))
   const around = town.residents.filter((r) => !r.idle).length
   const open = town.houses.find((h) => h.channel === house)
   return (
@@ -81,24 +83,43 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
         {town.houses.length === 0 && <p className="empty">{state.cursor === null ? 'loading…' : 'no houses yet: a channel is a house, so post in one'}</p>}
         <div className="town-labels">
           {town.houses.map((h) => (
-            <div key={`house:${h.channel}`} className="over" ref={over(`house:${h.channel}`, () => new Vector3(h.x + HOUSE.width / 2, 0, h.y + LOT.plate - 6), rankOf(h))}>
+            <div key={`house:${h.channel}`} className="over" ref={over(`house:${h.channel}`, () => new Vector3(h.x + h.width / 2, 0, h.y + h.depth + PLATE - 8), rankOf(h))}>
               <button className={`plate${h.channel === house ? ' open' : ''}`} onClick={() => enter(h.channel)} title={h.channel === house ? `#${h.channel}` : `walk into #${h.channel}`}>
                 <span className="name">#{h.name}</span>
                 {h.tasks > 0 && <span className="count" title={`${h.tasks} open task${h.tasks === 1 ? '' : 's'}`}>{h.tasks}</span>}
-                {h.channel !== house && h.people > PORCH && <span className="count">+{h.people - PORCH}</span>}
               </button>
             </div>
           ))}
+          {/* Who's in a house with its roof on, over its roof, as a room's names show over it. */}
+          {town.houses
+            .filter((h) => h.channel !== house && h.who.length > 0)
+            .map((h) => (
+              <div key={`roof:${h.channel}`} className="over" ref={over(`roof:${h.channel}`, () => new Vector3(h.x + h.width / 2, 150, h.y + h.depth / 2), 4)}>
+                <div className="stack">
+                  {said.get(h.channel) && (
+                    <button className="bubble" onClick={() => navigate(hereWith({ thread: said.get(h.channel)!.bubble!.thread }))} title="open the thread">
+                      <span className="who">{said.get(h.channel)!.name}</span>
+                      <span className="text">{said.get(h.channel)!.bubble!.text}</span>
+                    </button>
+                  )}
+                  <button className="roof-pill" onClick={() => enter(h.channel)} title={`${h.who.map((w) => w.name).join(', ')} in #${h.channel}`}>
+                    <i className={h.who.some((w) => !w.idle) ? 'on' : ''} />
+                    {h.who.slice(0, 3).map((w) => w.name).join(', ')}
+                    {h.who.length > 3 && <span className="more">+{h.who.length - 3}</span>}
+                  </button>
+                </div>
+              </div>
+            ))}
           {open?.tables.map((table) => (
-            <div key={`table:${table.thread}`} className="over table-label" ref={over(`table:${table.thread}`, () => new Vector3(table.x + 70, 22, table.y + 30))}>
+            <div key={`table:${table.thread}`} className="over table-label" ref={over(`table:${table.thread}`, () => new Vector3(table.x + 70, 26, table.y + 2), table.seated > 0 ? 2 : 0)}>
               <button onClick={() => navigate(hereWith({ thread: table.thread }))} title="open the thread">
                 <span className="label">{table.label || 'a thread'}</span>
-                {table.task && <span className="state">{table.task}</span>}
+                {table.task && <span className={`state ${table.task}`}>{table.task}</span>}
               </button>
             </div>
           ))}
           {town.residents.map((r) => (
-            <PersonLabel key={`person:${r.actor}`} resident={r} inside={r.channel === house} attach={over(`person:${r.actor}`, () => world.current?.personAt(r.actor) ?? null)} />
+            <PersonLabel key={`person:${r.actor}`} resident={r} attach={over(`person:${r.actor}`, () => world.current?.personAt(r.actor) ?? null)} />
           ))}
         </div>
       </div>
@@ -107,9 +128,8 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
   )
 }
 
-/** A resident's name and what they just said, over their head. Outside, only who's talking and you are named. */
-function PersonLabel({ resident: r, inside, attach }: { resident: Resident; inside: boolean; attach: (element: HTMLElement | null) => void }) {
-  const named = inside || r.you || r.bubble !== null
+/** Someone in sight: their name in a pill over their head, with what they just said over it. */
+function PersonLabel({ resident: r, attach }: { resident: Resident; attach: (element: HTMLElement | null) => void }) {
   return (
     <div className={`over person-label${r.idle ? ' idle' : ''}${r.you ? ' you' : ''}`} ref={attach}>
       <div className="stack">
@@ -118,14 +138,12 @@ function PersonLabel({ resident: r, inside, attach }: { resident: Resident; insi
             <span className="text">{r.bubble.text}</span>
           </button>
         )}
-        {named && (
-          <span className="tag" title={r.working ? 'working on a task here' : r.idle ? 'away' : undefined}>
-            {r.agent && <Bot size={10} strokeWidth={2} />}
-            {r.working && <Hammer size={10} strokeWidth={2} />}
-            {r.you ? 'you' : r.name}
-            {r.idle && ' z'}
-          </span>
-        )}
+        <span className="tag" title={r.working ? 'working on a task here' : r.idle ? 'away' : undefined}>
+          <i className={r.idle ? '' : 'on'} />
+          {r.agent && <Bot size={11} strokeWidth={2} />}
+          {r.you ? 'you' : r.name}
+          {r.working && <Hammer size={11} strokeWidth={2} />}
+        </span>
       </div>
     </div>
   )

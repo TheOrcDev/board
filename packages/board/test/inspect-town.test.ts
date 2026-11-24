@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { MessageView, TaskView } from '../src/api/routes.ts'
 import * as store from '../src/inspect/app/store.ts'
-import { BUBBLE_MS, GONE_MS, IDLE_MS, PORCH, TABLES, townOf } from '../src/inspect/app/town.ts'
+import { BUBBLE_MS, GONE_MS, IDLE_MS, sizeOf, townOf } from '../src/inspect/app/town.ts'
 
 const ME = 'vercel:user:u_julian'
 const ADA = 'vercel:user:u_ada'
@@ -52,19 +52,43 @@ function stateOf(channels: string[], messages: MessageView[]): store.State {
 const where = (town: ReturnType<typeof townOf>, actor: string) => town.residents.find((r) => r.actor === actor)
 
 describe('boardville', () => {
-  it('puts each channel in a house on its street: the main street first, then each path prefix, wrapping at the columns', () => {
-    const town = townOf(stateOf(['www/production', 'dev', 'www/errors', 'deploys', 'www/preview'], []), NOW, 2)
-    expect(town.streets.map((s) => [s.name, s.rows])).toEqual([
-      ['main street', 1],
-      ['www', 2],
-    ])
+  it('puts each channel in a house on its street: the main street first, then each path prefix, wrapping where a row is full', () => {
+    const channels = ['www/production', 'dev', 'www/errors', 'deploys', 'www/preview']
+    // Three threads in each: standard houses, two to a row two standard houses wide.
+    const threads = channels.flatMap((channel, c) => [1, 2, 3].map((n) => message(c * 10 + n, ADA, channel)))
+    const town = townOf(stateOf(channels, threads), NOW, 2)
+    expect(town.streets.map((s) => s.name)).toEqual(['main street', 'www'])
     const house = (channel: string) => town.houses.find((h) => h.channel === channel)!
     expect(house('deploys').y).toBe(house('dev').y)
     expect(house('www/errors').y).toBeGreaterThan(house('dev').y)
-    // A third house on a street of two columns goes on the street's next row, under the first.
+    // A third house on a full row goes on the street's next row, under the first.
     expect(house('www/production').x).toBe(house('www/errors').x)
     expect(house('www/production').y).toBeGreaterThan(house('www/errors').y)
     expect(house('www/errors').name).toBe('errors')
+  })
+
+  it('grows a house with its threads, in steps, up to a hall of sixteen tables', () => {
+    const house = (threads: number) => {
+      const roots = Array.from({ length: threads }, (_, i) => message(i + 1, ADA, 'dev'))
+      return townOf(stateOf(['dev'], roots), NOW, 4).houses[0]!
+    }
+    expect(house(0).width).toBeLessThan(house(2).width)
+    expect(house(4).depth).toBeGreaterThan(house(2).depth)
+    expect(house(9).width).toBeGreaterThan(house(4).width)
+    expect(house(13).tables).toHaveLength(13)
+    expect(house(40).tables).toHaveLength(16)
+    expect(house(40).width).toBe(house(16).width)
+    // A board that counts a channel's threads sizes its house by them, loaded or not.
+    const counted = { ...stateOf(['dev'], []), channels: { dev: { path: 'dev', threads: 9 } } }
+    expect(townOf(counted, NOW, 4).houses[0]!.width).toBe(sizeOf(9).width)
+  })
+
+  it('stands houses of one row on one front line, facing their street', () => {
+    const big = Array.from({ length: 9 }, (_, i) => message(i + 1, ADA, 'dev'))
+    const town = townOf(stateOf(['dev', 'prs'], [...big, message(50, ADA, 'prs')]), NOW, 4)
+    const [dev, prs] = town.houses
+    expect(dev!.depth).toBeGreaterThan(prs!.depth)
+    expect(dev!.y + dev!.depth).toBe(prs!.y + prs!.depth)
   })
 
   it('makes a house of a channel only the stream has shown', () => {
@@ -124,22 +148,32 @@ describe('boardville', () => {
     expect(where(townOf(state, NOW, 4, { here: 'prs' }), ME)).toMatchObject({ channel: 'prs', you: true })
   })
 
-  it('counts a crowd its porch has no room for, the most recent on it', () => {
-    const crowd = Array.from({ length: PORCH + 2 }, (_, i) => message(i + 1, `vercel:user:u_${i}`, 'dev', { createdAt: ago((PORCH + 2 - i) * 1000) }))
-    const town = townOf(stateOf(['dev'], crowd), NOW, 4)
-    expect(town.houses[0]!.people).toBe(PORCH + 2)
-    const offPorch = town.residents.filter((r) => r.outside === null).map((r) => r.actor)
-    // The two who spoke first are the ones left off it.
-    expect(offPorch.sort()).toEqual(['vercel:user:u_0', 'vercel:user:u_1'])
+  it('says over a house who’s in it, the most recent first, and sends everyone in by its door', () => {
+    const state = stateOf(['dev'], [message(1, ADA, 'dev', { createdAt: ago(60_000) }), message(2, FX, 'dev', { createdAt: ago(1000) })])
+    const town = townOf(state, NOW, 4)
+    expect(town.houses[0]!.who.map((w) => [w.name, w.agent])).toEqual([
+      ['vercel:user:u_ada+fx', true],
+      ['vercel:user:u_ada', false],
+    ].map(([id, agent]) => [store.nameOf(state, id as string), agent]))
+    const house = town.houses[0]!
+    for (const actor of [ADA, FX]) {
+      const door = where(town, actor)!.door
+      expect(door.y).toBeGreaterThan(house.y + house.depth - 1)
+      expect(Math.abs(door.x + 15 - (house.x + house.width / 2))).toBeLessThan(2)
+    }
   })
 
-  it('makes a house’s threads with the latest activity its tables, each saying its root’s first line', () => {
-    const threads = Array.from({ length: TABLES + 1 }, (_, i) => message(i + 1, ADA, 'dev', { text: `thread ${i + 1}\nmore`, createdAt: ago((TABLES + 1 - i) * 60_000) }))
-    // A reply moves the oldest thread up to the newest.
-    const reply = message(99, FX, 'dev', { re: '1', createdAt: ago(1000) })
-    const house = townOf(stateOf(['dev'], [...threads, reply]), NOW, 4).houses[0]!
-    expect(house.tables.map((t) => t.thread)).toEqual(['1', '5', '4', '3'])
+  it('makes a house’s threads its tables: those with someone at them first, then the latest, each saying its root’s first line', () => {
+    const threads = Array.from({ length: 20 }, (_, i) => message(i + 1, `vercel:user:u_${i % 2}`, 'dev', { text: `thread ${i + 1}\nmore`, createdAt: ago((20 - i) * 60_000) }))
+    // Ada last spoke in the oldest thread: it still gets a table, though sixteen are newer.
+    const reply = message(99, ADA, 'dev', { re: '1', createdAt: ago(1000) })
+    const state = stateOf(['dev'], [...threads.map((m) => ({ ...m, by: { ...m.by, actor: 'vercel:user:u_bob', principal: 'vercel:user:u_bob' } })), reply])
+    const house = townOf(state, NOW, 4).houses[0]!
+    expect(house.tables).toHaveLength(16)
+    expect(house.tables[0]!.thread).toBe('1')
     expect(house.tables[0]!.label).toBe('thread 1')
+    expect(house.tables.map((t) => t.thread)).toContain('20')
+    expect(house.tables.map((t) => t.thread)).not.toContain('2')
   })
 
   it('seats each resident at the table of the thread they were last in, and the rest inside the door', () => {
@@ -151,8 +185,10 @@ describe('boardville', () => {
       expect(Math.abs(seat.x - table.x)).toBeLessThan(120)
       expect(Math.abs(seat.y - table.y)).toBeLessThan(50)
     }
-    // Two at one table don't sit in one seat.
+    // Two at one table don't sit in one seat, and both face it from its far side.
     expect(where(town, ADA)!.inside).not.toEqual(where(town, FX)!.inside)
+    expect(where(town, ADA)).toMatchObject({ seated: true, facing: 0 })
+    expect(where(town, ADA)!.inside.y).toBeLessThan(table.y)
     // You came in by the door: at no table.
     expect(where(town, ME)).toMatchObject({ thread: null })
     expect(where(town, ME)!.inside.y).toBeGreaterThan(table.y + 50)

@@ -636,6 +636,7 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
   --smoke: #d0d0d0;
   --floor: #e2cfae;
   --table: #a77b52;
+  --chair: #5a6270;
   --roof-0: #b8604f; --roof-1: #5b7fa6; --roof-2: #6f9363; --roof-3: #c39a4a; --roof-4: #8a72a8; --roof-5: #4f8f8a;
   position: relative;
   flex: 1;
@@ -655,6 +656,7 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
     --smoke: #6a6a6a;
     --floor: #4a3e2f;
     --table: #7a5a3c;
+    --chair: #3c424c;
   }
 }
 /* A house you're in: the scene keeps the top of the page, its channel the rest. */
@@ -695,20 +697,30 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
 .town .table-label button:hover { border-color: var(--bright); }
 .town .table-label .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .town .table-label .state { color: var(--muted); font-size: 9px; }
-.person-label .stack { display: grid; justify-items: center; gap: 4px; }
-.person-label .tag {
+.town .table-label .state.claimed { color: #2f7fd8; }
+/* Names float as dark pills, as people's do in a virtual office: a dot says who's around. */
+.town .stack { display: grid; justify-items: center; gap: 4px; }
+.person-label .tag, .town .roof-pill {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 0 4px;
-  background: var(--bg);
-  color: var(--dim);
-  font-size: 10px;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  background: rgba(24, 26, 32, 0.88);
+  color: #f4f4f4;
+  font-size: 11px;
   line-height: 15px;
   white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
-.person-label.you .tag { color: var(--bg); background: var(--bright); font-weight: 600; }
-.person-label.idle .tag { color: var(--faint); }
+.person-label .tag i, .town .roof-pill i { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid #9aa0a8; flex-shrink: 0; }
+.person-label .tag i.on, .town .roof-pill i.on { background: #3ccf6b; border-color: #3ccf6b; }
+.person-label.you .tag { background: #f4f4f4; color: #181a20; font-weight: 600; }
+.person-label.idle .tag { color: #b0b4ba; }
+.town .roof-pill { padding: 3px 10px 3px 8px; font-size: 12px; }
+.town .roof-pill:hover { background: rgba(24, 26, 32, 1); }
+.town .roof-pill .more { color: #b0b4ba; }
+.bubble .who { display: block; color: var(--muted); font-size: 10px; }
 .bubble {
   position: relative;
   width: max-content;
