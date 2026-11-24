@@ -98,3 +98,18 @@ it('lets what runs it verify a delivery itself, and say which channel it is in',
   expect(received[0]!.event).toMatchObject({ channel: 'deploys:syn_1', thread: 'deploys:syn_1:deployment:prj_web:main' })
   expect(seen).toEqual(['no one', 'host'])
 })
+
+it('hands a check of your own the request whole, so one that reads the body verifies it, and the delivery still lands', async () => {
+  const bodies: string[] = []
+  const send = setup({
+    secret: async (request) => {
+      bodies.push(await request.text())
+      return true
+    },
+  })
+  const delivery = deployment('deployment.error', 'evt_1')
+  const { status, received } = await send(delivery)
+  expect(status).toBe(200)
+  expect(bodies).toEqual([JSON.stringify(delivery)])
+  expect(received[0]!.event).toMatchObject({ message: 'evt_1' })
+})

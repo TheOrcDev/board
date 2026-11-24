@@ -142,10 +142,12 @@ export class VercelProvider extends SyncProvider<VercelEvent> {
   }
 
   async receive(key: string, request: Request, emit: Receive): Promise<Response> {
-    const body = await request.text()
     const { secret } = this.config
-    // Nothing of the body is read before the delivery is verified.
-    const verified = typeof secret === 'string' ? await signed(secret, body, request.headers.get('x-vercel-signature')) : await secret(request)
+    // A check of your own gets the request whole, body included: reading it here first would leave it none to read.
+    const checked = typeof secret === 'string' ? null : request.clone()
+    const body = await request.text()
+    // Nothing of the body is parsed before the delivery is verified.
+    const verified = typeof secret === 'string' ? await signed(secret, body, request.headers.get('x-vercel-signature')) : await secret(checked!)
     if (!verified) return new Response('invalid signature', { status: 401 })
     let delivery: VercelWebhook
     try {
