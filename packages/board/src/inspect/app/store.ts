@@ -2,6 +2,7 @@ import type { ActorView, BlockView, BoardEventView, ChannelView, Discovery, Gran
 // `@vercel/board/schemas`, in an app of yours.
 import { findBlocks } from '../../contract/blocks.ts'
 import { canonicalEmoji } from '../../contract/emoji.ts'
+import { mentionsMe } from '../../contract/mentions.ts'
 import type { ScheduleTiming } from '../../server/index.default.ts'
 import { shownName } from './words.ts'
 
@@ -193,14 +194,18 @@ export function merge(state: State, views: MessageView[]): State {
 }
 
 // #region guide inspector/pending.ts
+/** A text with each mention as a bare `@`: the board writes a typed `@ada` that names one actor as `@[their-id]`. */
+const unmentioned = (text: string) => text.replace(/@(\[[^\]\s]*\]|[\w./-]*)/g, '@')
+
 /**
- * The post on its way that a message stands for: yours, in the same place, saying the same. The
- * feed can bring the message before the board answers the post, so whichever comes first replaces
- * the pending one, and the two never show at once.
+ * The post on its way that a message stands for: yours, in the same place, saying the same, its
+ * mentions aside. The feed can bring the message before the board answers the post, so whichever
+ * comes first replaces the pending one, and the two never show at once.
  */
 export function landed<Post extends { channel: string; re: string | null; text: string; error: string | null }>(pending: Post[], message: MessageView, me: string): Post | undefined {
   if (message.by.actor !== me) return undefined
-  return pending.find((post) => post.error === null && post.channel === message.channel && post.re === message.re && post.text === message.text)
+  const said = unmentioned(message.text)
+  return pending.find((post) => post.error === null && post.channel === message.channel && post.re === message.re && unmentioned(post.text) === said)
 }
 // #endregion
 
@@ -517,6 +522,30 @@ export function nameOf(state: State, id: string): string {
   const principal = plus === -1 ? id : id.slice(0, plus)
   const tail = state.actors[principal]?.name ?? principal.slice(principal.lastIndexOf(':') + 1)
   return plus === -1 ? tail : `${id.slice(plus + 1)} via ${tail}`
+}
+
+const NAMES = new WeakMap<State['actors'], Record<string, string>>()
+/**
+ * Every actor the page knows, by ID, by their own name, which a mention of them reads as: the same
+ * record until one of them changes, so a row's text renders once.
+ */
+export function namesOf(state: State): Record<string, string> {
+  let names = NAMES.get(state.actors)
+  if (!names) NAMES.set(state.actors, (names = Object.fromEntries(Object.entries(state.actors).map(([id, actor]) => [id, actor.name]))))
+  return names
+}
+
+// --- mentions of you ---------------------------------------------------------------------------
+
+/**
+ * The new post a live event brings when it mentions `person`, as `--mentions me` matches: their
+ * actor ID (`@[id]`) or handle (`@julian`) in the text, outside code. A mention of one of their
+ * profiles isn't one of them. Their own posts don't count; their agents' do.
+ */
+export function mentionOf(event: BoardEventView, person: Pick<Me, 'actor' | 'handle'>): MessageView | null {
+  const message = event.message
+  if (event.type !== 'message.posted' || !message || message.deleted || message.by.actor === person.actor) return null
+  return mentionsMe(message.text, { id: person.actor, handle: person.handle }) ? message : null
 }
 
 // --- tasks: a thread with a state ---------------------------------------------------------

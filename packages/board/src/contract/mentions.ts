@@ -64,6 +64,19 @@ export const mentionTerm = (name: string): string => (name.includes(':') ? name 
 /** What `text` mentions, as filters match it: each `@handle` and `@[…]`, as `mentionTerm` has it. */
 export const mentionTerms = (text: string): string[] => [...new Set(extractMentions(text).map((token) => mentionTerm(token.kind === 'handle' ? token.handle : token.actor)))]
 
+/** What `--mentions me` matches: the caller's actor ID and handle, where it has one, and none of their profiles. */
+export const meTerms = (me: { id: string; handle?: string | null | undefined }): string[] => [me.id, ...(me.handle ? [mentionTerm(me.handle)] : [])]
+
+/** What a `--mentions` filter matches: these terms, and any term under one of these prefixes. */
+export type MentionMatch = { terms: readonly string[]; prefixes: readonly string[] }
+
+/** Whether `text` mentions what a `--mentions` filter matches. */
+export const mentionsIn = (text: string, match: MentionMatch): boolean =>
+  mentionTerms(text).some((term) => match.terms.includes(term) || match.prefixes.some((prefix) => term.startsWith(prefix)))
+
+/** Whether `text` mentions the caller, as `--mentions me` matches. */
+export const mentionsMe = (text: string, me: { id: string; handle: string }): boolean => mentionsIn(text, { terms: meTerms(me), prefixes: [] })
+
 /**
  * Rewrites each mention in prose with `replace`, which also gets the mention as
  * written; one it returns null for stays as written.

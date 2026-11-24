@@ -11,7 +11,7 @@ import { foldActors, foldMessages, iso, type Actor, type ActorsState, type Messa
 import { blocksIn } from '../contract/blocks.ts'
 import { authorView, type Author } from '../contract/schemas.ts'
 import { actorParts, type Via } from '../contract/profiles.ts'
-import { mentionTerm, mentionTerms } from '../contract/mentions.ts'
+import { mentionsIn, mentionTerm, meTerms } from '../contract/mentions.ts'
 import { own } from '../contract/own.ts'
 import { concernedMessageId } from '../store/project.ts'
 import type { MessageFilter } from '../store/types.ts'
@@ -187,7 +187,7 @@ export type Me = { id: string; handle: string }
  * handle and ID. Anyone else doesn't, since that would say who goes by what where it can't read.
  */
 export function mentionFilter(value: string, context: { me: Me | null; actors: ActorsState; access: Access }): NonNullable<MessageFilter['mentions']> {
-  if (value === 'me') return { terms: context.me === null ? [] : [mentionTerm(context.me.handle), context.me.id], prefixes: [] }
+  if (value === 'me') return { terms: context.me === null ? [] : meTerms(context.me), prefixes: [] }
   const under = (name: string) => (name.includes(':') ? `${name}+` : `${mentionTerm(name)}/`)
   const terms = new Set([mentionTerm(value)])
   const prefixes = new Set([under(value)])
@@ -199,10 +199,6 @@ export function mentionFilter(value: string, context: { me: Me | null; actors: A
   }
   return { terms: [...terms], prefixes: [...prefixes] }
 }
-
-/** Whether `text` mentions what a `--mentions` filter matches. */
-const mentionsIn = (text: string, filter: NonNullable<MessageFilter['mentions']>) =>
-  mentionTerms(text).some((term) => filter.terms.includes(term) || filter.prefixes.some((prefix) => term.startsWith(prefix)))
 
 /** Whether `author` is one of `who`: its actor, or an agent of one of its people. */
 const covers = (who: { actors: Set<string>; principals: Set<string> }, actor: string, principal?: string) =>
