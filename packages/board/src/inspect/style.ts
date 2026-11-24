@@ -624,135 +624,93 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
   .composer-footer .send { margin-left: auto; }
 }
 
-/* --- boardville: channels as houses on streets, everyone at the house they were last active in --- */
+/* --- boardville: the board as a village in 3D, its text as page elements over the scene --- */
 .town {
-  --ground: #eef1ea;
-  --street: #d9ded2;
+  --ground: #dfe8d4;
+  --street: #cfd4c4;
   --walls: #fbfaf6;
   --ink: #4a4a4a;
   --window: #dfe6ec;
   --lit: #f3d27a;
-  --door: #8a6a4f;
-  --smoke: #b8b8b8;
-  --floor: #e9dcc4;
-  --table: #f6efe2;
+  --smoke: #d0d0d0;
+  --floor: #e2cfae;
+  --table: #a77b52;
   --roof-0: #b8604f; --roof-1: #5b7fa6; --roof-2: #6f9363; --roof-3: #c39a4a; --roof-4: #8a72a8; --roof-5: #4f8f8a;
+  position: relative;
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   background: var(--ground);
-  /* Room over the first street for what its people say. */
-  padding: 56px 8px 24px;
 }
 @media (prefers-color-scheme: dark) {
   .town {
-    --ground: #101410;
-    --street: #232a23;
-    --walls: #22231f;
+    --ground: #1a2219;
+    --street: #2a3129;
+    --walls: #3a3b36;
     --ink: #8d8d8d;
     --window: #2c3238;
     --lit: #e3b955;
-    --door: #6b513c;
-    --smoke: #555;
-    --floor: #2e2820;
-    --table: #3a332a;
+    --smoke: #6a6a6a;
+    --floor: #4a3e2f;
+    --table: #7a5a3c;
   }
 }
-/* A house open under the map: the map keeps the top of the page, its channel the rest. */
-.town.inside { flex: 0 0 min(60%, 480px); border-bottom: 1px solid var(--hairline); }
+/* A house you're in: the scene keeps the top of the page, its channel the rest. */
+.town.inside { flex: 0 0 min(58%, 520px); border-bottom: 1px solid var(--hairline); }
 .town-inside { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.town-frame { position: relative; margin: 0 auto; }
-.town-map { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-.street { position: absolute; left: 0; right: 0; border-bottom: 2px dashed var(--street); }
-.street-sign {
-  position: absolute;
-  left: 0;
-  top: 64px;
-  max-width: 116px;
-  padding: 3px 8px;
-  background: var(--walls);
+.town-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.town .empty { position: relative; }
+.town-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+/* A label sits at its point: the scene moves it there each frame, and its content hangs above it. */
+.town-labels .over { position: absolute; left: 0; top: 0; will-change: transform; }
+.town-labels .over > * { position: absolute; left: 0; bottom: 0; width: max-content; transform: translateX(-50%); }
+.town-labels button { pointer-events: auto; }
+.town .plate {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
   border: 1px solid var(--ink);
+  background: var(--walls);
   color: var(--bright);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 12px;
   white-space: nowrap;
 }
-.house { position: absolute; }
-.house .plan, .house .roof, .house .roof svg { position: absolute; inset: 0; display: block; overflow: visible; }
-.house .floor { fill: var(--floor); }
-.house .wall { fill: none; stroke: var(--ink); stroke-width: 10; stroke-linejoin: miter; }
-.house .mat { fill: var(--door); }
-/* The roof comes off the house you walk into, and only that one. */
-.house .roof { padding: 0; z-index: 1; transition: opacity 0.5s ease, transform 0.5s ease; }
-.house.open .roof { opacity: 0; transform: translateY(-14px); pointer-events: none; }
-.house .slope { fill: var(--roof); stroke: var(--ink); stroke-width: 1.5; stroke-linejoin: round; }
-.house .slope.side { filter: brightness(0.86); }
-.house .slope.near { filter: brightness(1.08); }
-.house .ridge { stroke: var(--ink); stroke-width: 2; }
-.house .chimney { fill: var(--walls); stroke: var(--ink); stroke-width: 1.5; }
-.house .skylight { fill: var(--window); stroke: var(--ink); stroke-width: 1.5; }
-.house.lit .skylight { fill: var(--lit); }
-.house .roof:hover .slope { stroke: var(--bright); stroke-width: 2.5; }
-.house .smoke circle { fill: var(--smoke); animation: smoke 2.4s ease-out infinite; }
-.house .smoke circle + circle { animation-delay: 1.2s; }
-@keyframes smoke { from { opacity: 0.9; transform: translateY(0); } to { opacity: 0; transform: translateY(-12px); } }
-.roof-0 { --roof: var(--roof-0); } .roof-1 { --roof: var(--roof-1); } .roof-2 { --roof: var(--roof-2); }
-.roof-3 { --roof: var(--roof-3); } .roof-4 { --roof: var(--roof-4); } .roof-5 { --roof: var(--roof-5); }
-/* A table is a thread: what it says on it, and a task's state. */
-.house .table {
-  position: absolute;
-  width: 140px;
-  height: 34px;
+.town .plate:hover, .town .plate.open { border-color: var(--bright); }
+.town .plate.open .name { text-decoration: underline; text-underline-offset: 3px; }
+.town .plate .count { padding: 0 5px; background: var(--bright); color: var(--bg); font-size: 10px; line-height: 16px; }
+.town .table-label button {
   display: grid;
-  align-content: center;
-  padding: 2px 8px;
-  border: 1.5px solid var(--ink);
-  border-radius: 6px;
-  background: var(--table);
+  max-width: 150px;
+  padding: 1px 6px;
+  background: var(--bg);
+  border: 1px solid var(--ink);
   color: var(--bright);
   font-size: 10px;
-  line-height: 1.25;
+  line-height: 1.3;
   text-align: left;
-  animation: appear 0.4s ease both;
 }
-.house .table:hover { border-color: var(--bright); }
-.house .table .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.house .table .state { color: var(--muted); font-size: 9px; }
-@keyframes appear { from { opacity: 0; } to { opacity: 1; } }
-.house .plate { position: absolute; left: 0; right: 0; display: flex; justify-content: center; align-items: center; gap: 4px; color: var(--bright); font-size: 12px; }
-.house .plate .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.house.open .plate .name { text-decoration: underline; text-underline-offset: 3px; }
-.house .plate .count { padding: 0 5px; background: var(--bright); color: var(--bg); font-size: 10px; line-height: 16px; }
-.person.hidden { opacity: 0; pointer-events: none; }
-/* A resident walks: their spot changes, and the transform eases them there. */
-.person {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 34px;
-  display: grid;
-  justify-items: center;
-  transition: transform 1.4s ease-in-out, opacity 0.6s;
-  z-index: 2;
+.town .table-label button:hover { border-color: var(--bright); }
+.town .table-label .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.town .table-label .state { color: var(--muted); font-size: 9px; }
+.person-label .stack { display: grid; justify-items: center; gap: 4px; }
+.person-label .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 4px;
+  background: var(--bg);
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 15px;
+  white-space: nowrap;
 }
-.person:hover { z-index: 4; }
-.person .avatar { border-radius: 50%; outline: 2px solid var(--walls); }
-.person.agent .avatar { border-radius: 8px; }
-.person.you .avatar { outline: 2px solid var(--bright); }
-.person.idle { opacity: 0.45; }
-.person .tag { max-width: 40px; margin-top: 1px; color: var(--dim); font-size: 9px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.person.you .tag { color: var(--bright); font-weight: 600; }
-.person .badge { position: absolute; top: -3px; right: -3px; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--bright); color: var(--bg); }
-.person .badge.work { right: auto; left: -3px; }
-.person .zz { position: absolute; top: -10px; right: -6px; color: var(--muted); font-size: 11px; font-style: italic; }
+.person-label.you .tag { color: var(--bg); background: var(--bright); font-weight: 600; }
+.person-label.idle .tag { color: var(--faint); }
 .bubble {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: -6px;
-  z-index: 3;
+  position: relative;
   width: max-content;
-  max-width: 176px;
+  max-width: 190px;
   padding: 4px 8px;
   border: 1px solid var(--ink);
   border-radius: 8px;
@@ -763,13 +721,8 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
   text-align: left;
 }
 .bubble .text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.bubble::after { content: ''; position: absolute; left: 18px; bottom: -5px; width: 8px; height: 8px; background: var(--bg); border-right: 1px solid var(--ink); border-bottom: 1px solid var(--ink); transform: rotate(45deg); }
+.bubble::after { content: ''; position: absolute; left: calc(50% - 4px); bottom: -5px; width: 8px; height: 8px; background: var(--bg); border-right: 1px solid var(--ink); border-bottom: 1px solid var(--ink); transform: rotate(45deg); }
 .bubble:hover, .bubble:hover::after { border-color: var(--bright); }
-@media (prefers-reduced-motion: reduce) {
-  .person { transition: none; }
-  .house .smoke circle, .house .table { animation: none; }
-  .house .roof { transition: none; }
-}
 
 .toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 60; }
 .toast { max-width: 420px; padding: 8px 12px; border: 1px solid var(--dim); background: var(--bg); color: var(--bright); }

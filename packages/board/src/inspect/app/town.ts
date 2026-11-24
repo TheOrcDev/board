@@ -18,7 +18,7 @@ export const GONE_MS = 24 * 60 * 60_000
 /** A house, seen from above: its walls, and the floor inside them. */
 export const HOUSE = { width: 340, height: 340, wall: 10 }
 /** A house's lot: the house, its porch under it, and the sign under that. */
-export const LOT = { width: 384, height: HOUSE.height + 104, porch: HOUSE.height + 10, plate: HOUSE.height + 56 }
+export const LOT = { width: 430, height: HOUSE.height + 104, porch: HOUSE.height + 10, plate: HOUSE.height + 56 }
 /** A street's sign, on the left of its first row. */
 export const SIGN = 132
 /** The tables a house has room for: its threads with the latest activity. */
