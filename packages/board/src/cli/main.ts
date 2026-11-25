@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { parseArgs } from 'node:util'
-import { CHANNELS_LIMIT_MAX, GRANT_BATCH_MAX, THREADS_LIMIT_DEFAULT, THREADS_LIMIT_MAX, type GrantInput, type ManagedSyncView, type Me, type MessageView } from '../api/routes.ts'
+import { CHANNELS_LIMIT_MAX, GRANT_BATCH_MAX, THREADS_LIMIT_DEFAULT, THREADS_LIMIT_MAX, type GrantInput, type Me, type MessageView } from '../api/routes.ts'
 import { everyChannel } from '../client/channels.ts'
 import { mentionValue, withMentions } from '../api/tail.ts'
 import { BoardError, type ClaimedTask, type Filters, type ProfileOption, type TaskInBatch, type Written } from '../client/client.ts'
@@ -2029,20 +2029,14 @@ async function run(command: string | undefined, args: string[]): Promise<number>
           if (flags.json) return result({ syncs: list }), 0
           return out(list.length ? list.map(formatManagedSync).join('\n') : `no syncs in ${channel}`), 0
         }
-        // One that waits on its source, as a Slack channel that has yet to agree, says so in place of `syncing`.
-        const started = (made: ManagedSyncView) => {
-          if (flags.json) return result({ sync: made, outcome: made.state === 'active' ? 'synced' : made.state }), 0
-          return out(made.state === 'active' ? `syncing ${formatManagedSync(made)}` : formatManagedSync(made)), 0
-        }
         // A Slack channel through Vercel's Slack app: `slack/vercel:#alerts`.
         const mirrored = /^slack\/vercel:(.+)$/.exec(args[1])?.[1]
-        if (mirrored !== undefined) return started(await client().createSync({ channel, source: 'slack', slack: { channel: mirrored, ...(flags.workspace ? { workspace: flags.workspace } : {}) } }))
-        if (args[1] !== 'vercel')
-          throw usage(`${args[1]} isn't something a board syncs a channel with: vercel, or slack/vercel:#channel. To sync a thread, name a message in it.`, { reason: 'invalid_arguments' })
-        const events = (flags.events ?? []).flatMap((given) => given.split(',')).map((name) => name.trim()).filter(Boolean)
-        if (events.length === 0) throw usage(`Missing the events to bring in: --events deployment.error`, { reason: 'missing_arguments' })
-        const projects = (flags.project ?? []).flatMap((given) => given.split(',')).map((name) => name.trim()).filter(Boolean)
-        return started(await client().createSync({ channel, source: 'vercel', events, ...(projects.length ? { projects } : {}) }))
+        if (mirrored === undefined)
+          throw usage(`${args[1]} isn't something a board syncs a channel with: slack/vercel:#channel. To sync a thread, name a message in it.`, { reason: 'invalid_arguments' })
+        const made = await client().createSync({ channel, source: 'slack', slack: { channel: mirrored, ...(flags.workspace ? { workspace: flags.workspace } : {}) } })
+        // One that waits on its source, as a Slack channel that has yet to agree, says so in place of `syncing`.
+        if (flags.json) return result({ sync: made, outcome: made.state === 'active' ? 'synced' : made.state }), 0
+        return out(made.state === 'active' ? `syncing ${formatManagedSync(made)}` : formatManagedSync(made)), 0
       }
       const id = messageId(args[0])
       if (!args[1]) {

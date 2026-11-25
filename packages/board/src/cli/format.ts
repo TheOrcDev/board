@@ -364,11 +364,9 @@ const until = (iso: string, now: number) => {
  * made it says it. One that isn't running says so last, and why.
  */
 export function formatManagedSync(sync: ManagedSyncView): string {
-  const what = sync.slack
-    ? [`slack/vercel:${sync.slack.name ? `#${sync.slack.name}` : sync.slack.channel}`]
-    : [sync.source, ...(sync.events?.length ? [`--events ${sync.events.join(',')}`] : []), ...(sync.projects?.length ? [`--project ${sync.projects.join(',')}`] : [])]
+  const what = sync.slack ? `slack/vercel:${sync.slack.name ? `#${sync.slack.name}` : sync.slack.channel}` : sync.source
   const held = sync.state === 'active' ? [] : [sync.reason ? `${sync.state}: ${sync.reason}` : sync.state]
-  return [sync.id, sync.channel, what.join(' '), ...held].join('  ')
+  return [sync.id, sync.channel, what, ...held].join('  ')
 }
 
 export function formatSchedule(schedule: ScheduleView, options: { pad?: string; now?: number } = {}): string {

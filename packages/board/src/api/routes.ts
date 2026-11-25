@@ -244,17 +244,13 @@ export const SchedulesQuery = z.object({
 })
 
 /**
- * The sources a board that runs syncs itself brings in: `vercel`, the team's own Vercel events,
- * and `slack`, a Slack channel mirrored both ways through Vercel's Slack app.
+ * The sources a board that runs syncs itself brings in: `slack`, a Slack channel mirrored both
+ * ways through Vercel's Slack app.
  */
-export const MANAGED_SYNC_SOURCES = ['vercel', 'slack'] as const
+export const MANAGED_SYNC_SOURCES = ['slack'] as const
 
 /**
  * A sync the board runs itself: one source into one channel, with no deployment of yours.
- *
- * A `vercel` sync names its `events` by the source's own names for them, as Vercel's webhooks
- * name theirs (`deployment.error`), and with `projects` the projects they're about, each by its
- * name or its ID: every project's without.
  *
  * A `slack` sync names the Slack channel it mirrors: `slack`, with the `channel`'s name or ID,
  * and the `workspace`'s domain or ID for a team with more than one. It is `pending` until someone
@@ -264,8 +260,6 @@ export const ManagedSyncBody = z
   .object({
     channel: ChannelPath,
     source: z.enum(MANAGED_SYNC_SOURCES),
-    events: z.array(z.string().min(1).max(100)).min(1).max(50).optional(),
-    projects: z.array(z.string().min(1).max(100)).min(1).max(50).optional(),
     slack: z
       .object({ channel: z.string().min(1).max(100), workspace: z.string().min(1).max(100).optional() })
       .strict()
@@ -866,14 +860,12 @@ export type ManagedSyncView = {
   id: string
   channel: string
   source: string
-  events?: string[]
-  /** The projects its events are about, by ID, however it was asked for them. */
-  projects?: string[]
   /** The Slack channel a `slack` sync mirrors, by ID, and its name when the sync was made: a rename in Slack leaves it behind. */
   slack?: { workspace: string; channel: string; name?: string }
   /**
    * `active` while it runs. `pending` until its source agrees to it, as a Slack channel must, and
-   * `paused` once its source is gone, as a webhook someone deleted is: nothing syncs in either.
+   * `paused` once its source is gone, as a Slack channel Vercel's Slack app can no longer reach
+   * is: nothing syncs in either.
    */
   state: 'pending' | 'active' | 'paused'
   /** Why one that isn't `active` isn't, in the board's words. */

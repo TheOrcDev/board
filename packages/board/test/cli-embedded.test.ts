@@ -353,7 +353,7 @@ describe('the embedded CLI', () => {
     }
   })
 
-  it("brings Vercel's events into a channel with one command, lists the board's syncs, and removes one", async () => {
+  it("lists the board's syncs, every channel's or one's, and removes one", async () => {
     const home = await isolated()
     vi.stubEnv('VERCEL_AUTH_TOKEN', 'user:u_jb')
     const api = fakeMessageboard({ slug: 'acme' })
@@ -363,19 +363,18 @@ describe('the embedded CLI', () => {
     try {
       const app = createApp({ appName: 'vercel board' })
       const run = (...argv: string[]) => capture(() => app.run([...argv, '--scope', 'acme']))
-      // The project by its name: the sync shows its ID.
-      const made = await run('sync', 'deploys', 'vercel', '--events', 'deployment.error,deployment.succeeded', '--project', 'web')
-      const [, id] = /^syncing (syn_\w+)  deploys  vercel --events deployment.error,deployment.succeeded --project prj_web\n$/.exec(made.stdout) ?? []
+      const made = await run('sync', 'alerts', 'slack/vercel:#alerts')
+      const [, id] = /^(syn_\w+)  alerts  slack\/vercel:#alerts  pending: waiting for the channel to agree\n$/.exec(made.stdout) ?? []
       expect([made.code, made.stderr, typeof id]).toEqual([0, '', 'string'])
-      expect((await run('sync', 'ops/alerts', 'vercel', '--events', 'firewall.attack')).code).toBe(0)
-      const row = `${id}  deploys  vercel --events deployment.error,deployment.succeeded --project prj_web\n`
+      expect((await run('sync', 'ops/alerts', 'slack/vercel:#ops-alerts')).code).toBe(0)
+      const row = `${id}  alerts  slack/vercel:#alerts  pending: waiting for the channel to agree\n`
       // A channel's own, by naming it either way, and the whole board's.
-      expect((await run('sync', 'deploys')).stdout).toBe(row)
-      expect((await run('syncs', 'deploys')).stdout).toBe(row)
-      expect((await run('syncs')).stdout.split('\n').map((line) => line.split('  ')[1])).toEqual(['deploys', 'ops/alerts', undefined])
-      expect(JSON.parse((await run('syncs', 'deploys', '--json')).stdout).syncs).toMatchObject([{ id, channel: 'deploys', source: 'vercel', projects: ['prj_web'], state: 'active' }])
+      expect((await run('sync', 'alerts')).stdout).toBe(row)
+      expect((await run('syncs', 'alerts')).stdout).toBe(row)
+      expect((await run('syncs')).stdout.split('\n').map((line) => line.split('  ')[1])).toEqual(['alerts', 'ops/alerts', undefined])
+      expect(JSON.parse((await run('syncs', 'alerts', '--json')).stdout).syncs).toMatchObject([{ id, channel: 'alerts', source: 'slack', slack: { channel: 'C0ALERTS', name: 'alerts' }, state: 'pending' }])
       expect(await run('sync', 'remove', id!)).toEqual({ code: 0, stdout: `removed ${row}`, stderr: '' })
-      expect((await run('sync', 'deploys')).stdout).toBe('no syncs in deploys\n')
+      expect((await run('sync', 'alerts')).stdout).toBe('no syncs in alerts\n')
     } finally {
       fetching.mockRestore()
       process.chdir(cwd)
@@ -383,7 +382,7 @@ describe('the embedded CLI', () => {
     }
   })
 
-  it('makes no sync without events, or from a source no board runs, and says which it does', async () => {
+  it('makes no sync from a source no board runs, and says which it does', async () => {
     const home = await isolated()
     vi.stubEnv('VERCEL_AUTH_TOKEN', 'user:u_jb')
     const api = fakeMessageboard({ slug: 'acme' })
@@ -393,12 +392,12 @@ describe('the embedded CLI', () => {
     try {
       const app = createApp({ appName: 'vercel board' })
       const run = (...argv: string[]) => capture(() => app.run([...argv, '--scope', 'acme']))
-      const noEvents = await run('sync', 'deploys', 'vercel')
-      expect([noEvents.code, noEvents.stdout]).toEqual([2, ''])
-      expect(noEvents.stderr).toContain('--events deployment.error')
-      const noSource = await run('sync', 'deploys', 'datadog', '--events', 'monitor.alert')
-      expect([noSource.code, noSource.stdout]).toEqual([2, ''])
-      expect(noSource.stderr).toContain("datadog isn't something a board syncs a channel with: vercel, or slack/vercel:#channel")
+      // Vercel's own events among them: a deployment's own vercel() brings those in.
+      for (const source of ['vercel', 'datadog']) {
+        const refused = await run('sync', 'deploys', source)
+        expect([refused.code, refused.stdout]).toEqual([2, ''])
+        expect(refused.stderr).toContain(`${source} isn't something a board syncs a channel with: slack/vercel:#channel`)
+      }
       expect((await run('syncs')).stdout).toBe('no syncs\n')
       expect(api.requests.filter((request) => request.startsWith('POST ') && request.includes('/syncs'))).toEqual([])
     } finally {

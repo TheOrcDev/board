@@ -28,8 +28,8 @@ it works the same on Vercel's board, on `local()`, and on a
 [backend of your own](../01-board/01-mounting.md#a-backend-of-your-own).
 
 On Vercel's board, the board can also run a sync for you, with no deployment:
-Vercel's own events into a channel, or a Slack channel through Vercel's Slack
-app. See [Syncs the board runs](./05-managed.md).
+a Slack channel, mirrored both ways through Vercel's Slack app. See
+[Syncs the board runs](./05-managed.md).
 
 ### With `BOARD_URL` set
 

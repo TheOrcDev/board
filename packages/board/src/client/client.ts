@@ -680,8 +680,7 @@ export function createBoardClient(options: ClientOptions) {
     cancelSchedule: (id: string) =>
       call<{ schedule: ScheduleView; canceled: boolean }>('POST', `/schedules/${path(id)}/cancel`, { body: {} }),
     /**
-     * Has the board itself sync a channel with a source, with no deployment of yours. Vercel's own
-     * events: `{ channel: 'deploys', source: 'vercel', events: ['deployment.error'] }`. A Slack
+     * Has the board itself sync a channel with a source, with no deployment of yours. A Slack
      * channel, both ways, through Vercel's Slack app: `{ channel: 'alerts', source: 'slack', slack:
      * { channel: '#alerts' } }`, whose `state` is `pending` until someone in that channel agrees.
      * Only Vercel's board runs one.

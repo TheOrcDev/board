@@ -1,68 +1,25 @@
 ---
 title: Syncs the board runs
-description: Bring Vercel's events into a channel, or mirror a Slack channel, with one command and no deployment of your own.
+description: Mirror a Slack channel on the board with one command and no deployment of your own.
 ---
 
 ## One command, no deployment
 
 Sync usually runs in your own deployment, in `board({ sync })`. On Vercel's
 board, the board can run a sync itself: you name a channel and a source, and it
-keeps the sync going with no code and no project of yours.
+keeps the sync going with no code and no project of yours. It runs one source:
+a Slack channel, mirrored both ways.
 
 ```bash
 # in a terminal:
-vb sync deploys vercel --events deployment.error --project web   # Vercel's events, into deploys
-vb sync alerts slack/vercel:#alerts                               # a Slack channel, both ways
-vb syncs                                                          # what the board runs, and its state
-vb sync remove syn_4f9a2c                                         # stop one: what it brought in stays
+vb sync alerts slack/vercel:#alerts   # a Slack channel, both ways
+vb syncs                              # what the board runs, and its state
+vb sync remove syn_9c2f7b             # stop one: what it brought in stays
 ```
 
 It takes `sync` in the channel, which for a person is `manage`. A board keeps at
 most 100 of them. Only Vercel's board runs syncs itself: `local()` and a
 backend of your own answer 501 `no_managed_sync`.
-
-## Vercel's events
-
-```bash
-vb sync deploys vercel --events deployment.error,deployment.succeeded --project web
-```
-
-`--events` takes the names Vercel's webhooks use: `deployment.created`,
-`deployment.error`, `firewall.attack`, `domain.created`, and every other event
-a team webhook can send. `--project` keeps it to some projects, each by its name
-or its ID, and repeats. Without it, the sync brings in every project's events,
-which takes access to every project.
-
-Each event lands as a message from Vercel: a line a person reads, the link to
-what it is about, and the event's payload as a
-[block](../01-board/04-messages.md#data) whose schema is the event's name, so
-an agent reads the data instead of parsing the line:
-
-````text
-web: production deployment failed (main)
-https://vercel.com/acme/web/8fK2
-
-```json#vercel.deployment.error@1
-{
-  "project": { "id": "prj_web" },
-  "target": "production",
-  …
-}
-```
-````
-
-A payload too big for one message stays off it: the line and the link still
-say what happened.
-
-Events about the same thing share a thread: one per project and branch for
-deployments (or per target, for one with no branch), one per domain, one per
-project for the rest. A failed deployment and the one that fixes it are in the
-same thread.
-
-The board makes a webhook on your team for each sync, as whoever asked for it.
-So a person asks, not a deployment, and that person may create the team's
-webhooks and read each project the sync names. The webhook shows with the
-team's other webhooks. Deleting it there pauses the sync.
 
 ## A Slack channel
 
@@ -96,20 +53,19 @@ a sync function of your own, see [Slack](./03-slack.md).
 
 ```text
 $ vb syncs
-syn_4f9a2c  deploys  vercel --events deployment.error --project prj_web
+syn_4f9a2c  support  slack/vercel:#support
 syn_9c2f7b  alerts   slack/vercel:#alerts  pending: waiting for the channel to agree
-syn_1b77e0  builds   vercel --events deployment.created  paused: its webhook is gone
+syn_1b77e0  ops      slack/vercel:#ops  paused: Vercel's Slack app can no longer reach the channel
 ```
 
 | State | What it means |
 | --- | --- |
 | `active` | It runs. |
 | `pending` | It never started: its source has yet to agree to it, as a Slack channel must. |
-| `paused` | It ran, and its source is gone: someone deleted its webhook, or Vercel's Slack app can no longer reach the channel. |
+| `paused` | It ran, and its source is gone: Vercel's Slack app can no longer reach the channel. |
 
 A paused Slack mirror starts again when the app is back in the channel and
-someone there runs `/vercel board sync` for the same board channel. A paused
-`vercel` sync is removed and made again.
+someone there runs `/vercel board sync` for the same board channel.
 
 ## From code
 
@@ -120,19 +76,18 @@ import { board } from '@vercel/board'
 
 const team = board()
 
-const sync = await team.createSync({ channel: 'deploys', source: 'vercel', events: ['deployment.error'], projects: ['web'] })
 const mirror = await team.createSync({ channel: 'alerts', source: 'slack', slack: { channel: '#alerts' } })
 mirror.state // 'pending', with mirror.reason: 'waiting for the channel to agree'
 
-await team.syncs({ channel: 'deploys' }) // [{ id, channel, source, events, projects, state, by, createdAt }]
-await team.removeSync(sync.id)
+await team.syncs({ channel: 'alerts' }) // [{ id, channel, source, slack, state, reason, by, createdAt }]
+await team.removeSync(mirror.id)
 ```
 
-## Shape it yourself
+## Vercel's events
 
-A sync the board runs lands every event the same way. To filter events, post
-them differently, or open tasks from them, run the same source in your own
-deployment, with a [sync function](./02-functions.md):
+The board doesn't run a sync of Vercel's own events yet. To bring them into a
+channel, run `vercel()` in your own deployment, with a
+[sync function](./02-functions.md):
 
 ```ts app/api/board/[[...path]]/route.ts
 import { board } from '@vercel/board'
@@ -155,3 +110,29 @@ function gets each event with `sync.event.name` as the webhook's type and
 `team` for an event about no project. Name the entry anything but `vercel`:
 an ID that starts with `vercel:` is one of Vercel's own principals. Vercel's
 events only come in, so nothing is sent back.
+
+With `into('deploys')`, each event lands as a message from Vercel: a line a
+person reads, the link to what it is about, and the event's payload as a
+[block](../01-board/04-messages.md#data) whose schema is the event's name, so
+an agent reads the data instead of parsing the line:
+
+````text
+web: production deployment failed (main)
+https://vercel.com/acme/web/8fK2
+
+```json#vercel.deployment.error@1
+{
+  "project": { "id": "prj_web" },
+  "target": "production",
+  …
+}
+```
+````
+
+A payload too big for one message stays off it: the line and the link still
+say what happened.
+
+Events about the same thing share a thread: one per project and branch for
+deployments (or per target, for one with no branch), one per domain, one per
+project for the rest. A failed deployment and the one that fixes it are in the
+same thread.

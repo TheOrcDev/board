@@ -223,13 +223,11 @@ type ApiRegistration = {
   hash: string
 }
 type ApiMatch = { id: string; watcher: string; threadId: string; lease: string; attempt: number; event: ApiChange & { messageId: string } }
-/** A sync the API runs itself: its channel by ID, and its projects by theirs. */
+/** A sync the API runs itself: its channel by ID. */
 type ApiManagedSync = {
   id: string
   channelId: string
   source: string
-  events?: string[]
-  projectIds?: string[]
   slack?: { workspaceId: string; channelId: string; name?: string }
   state: ManagedSyncView['state']
   reason?: string
@@ -2735,8 +2733,6 @@ export function createVercel(options: VercelOptions, environment: VercelEnvironm
     id: sync.id,
     channel: (await channelById(who, sync.channelId)).name,
     source: sync.source,
-    ...(sync.events ? { events: sync.events } : {}),
-    ...(sync.projectIds ? { projects: sync.projectIds } : {}),
     ...(sync.slack ? { slack: { workspace: sync.slack.workspaceId, channel: sync.slack.channelId, ...(sync.slack.name ? { name: sync.slack.name } : {}) } } : {}),
     state: sync.state,
     ...(sync.reason ? { reason: sync.reason } : {}),
@@ -3598,8 +3594,6 @@ export function createVercel(options: VercelOptions, environment: VercelEnvironm
           operationId: operationId(),
           channelId: (await channelToPost(who, input.channel)).id,
           source: input.source,
-          ...(input.events ? { events: input.events } : {}),
-          ...(input.projects ? { projects: input.projects } : {}),
           ...(input.slack ? { slack: input.slack } : {}),
         },
         signal,

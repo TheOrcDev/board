@@ -1923,24 +1923,24 @@ describe('vercel()', () => {
   it("makes, lists, and removes the syncs Vercel's API runs itself, each by its channel's name", async () => {
     const api = fakeMessageboard()
     const team = handleOn(api)
-    // A project by its name or its ID: the sync is answered with its ID either way.
-    const made = await team.createSync({ channel: 'deploys', source: 'vercel', events: ['deployment.error'], projects: ['web'] })
+    // The Slack channel by its name: the sync is answered with its ID, and its workspace's.
+    const made = await team.createSync({ channel: 'alerts', source: 'slack', slack: { channel: '#alerts' } })
     expect(made).toEqual({
       id: expect.stringMatching(/^syn_/),
-      channel: 'deploys',
-      source: 'vercel',
-      events: ['deployment.error'],
-      projects: ['prj_web'],
-      state: 'active',
+      channel: 'alerts',
+      source: 'slack',
+      slack: { workspace: 'T0ACME', channel: 'C0ALERTS', name: 'alerts' },
+      state: 'pending',
+      reason: 'waiting for the channel to agree',
       by: 'vercel:user:u_jb',
       createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
     })
-    const other = await team.createSync({ channel: 'ops/alerts', source: 'vercel', events: ['firewall.attack'] })
-    expect((await team.syncs()).map((sync) => [sync.id, sync.channel])).toEqual([[made.id, 'deploys'], [other.id, 'ops/alerts']])
-    expect((await team.syncs({ channel: 'deploys' })).map((sync) => sync.id)).toEqual([made.id])
+    const other = await team.createSync({ channel: 'ops/alerts', source: 'slack', slack: { channel: '#ops-alerts' } })
+    expect((await team.syncs()).map((sync) => [sync.id, sync.channel])).toEqual([[made.id, 'alerts'], [other.id, 'ops/alerts']])
+    expect((await team.syncs({ channel: 'alerts' })).map((sync) => sync.id)).toEqual([made.id])
     // A channel that isn't there has none, and asks the API for none.
     expect(await team.syncs({ channel: 'nowhere' })).toEqual([])
-    expect(await team.removeSync(made.id)).toMatchObject({ id: made.id, channel: 'deploys' })
+    expect(await team.removeSync(made.id)).toMatchObject({ id: made.id, channel: 'alerts' })
     expect((await team.syncs()).map((sync) => sync.id)).toEqual([other.id])
     await expect(team.removeSync(made.id)).rejects.toMatchObject({ status: 404, code: 'sync_not_found' })
   })
@@ -1957,25 +1957,21 @@ describe('vercel()', () => {
       state: 'pending',
       reason: 'waiting for the channel to agree',
     })
-    const events = await team.createSync({ channel: 'deploys', source: 'vercel', events: ['deployment.error'] })
-    // What its sources do next is theirs to say: the channel agrees, and someone deletes the webhook.
+    const other = await team.createSync({ channel: 'support', source: 'slack', slack: { channel: '#support' } })
+    // What Slack does next is its to say: one channel agrees, and the app is removed from the other.
     api.managedSyncs.set(mirror.id, { ...api.managedSyncs.get(mirror.id)!, state: 'active', reason: undefined })
-    api.managedSyncs.set(events.id, { ...api.managedSyncs.get(events.id)!, state: 'paused', reason: 'its webhook is gone' })
+    api.managedSyncs.set(other.id, { ...api.managedSyncs.get(other.id)!, state: 'paused', reason: "Vercel's Slack app can no longer reach the channel" })
     expect((await team.syncs()).map(({ id, state, reason }) => [id, state, reason])).toEqual([
       [mirror.id, 'active', undefined],
-      [events.id, 'paused', 'its webhook is gone'],
+      [other.id, 'paused', "Vercel's Slack app can no longer reach the channel"],
     ])
-    await expect(team.createSync({ channel: 'alerts', source: 'slack' })).rejects.toMatchObject({ status: 400, code: 'invalid_request' })
   })
 
-  it("says what Vercel's API says of a sync it won't make: an event it has none of, a deployment asking, a caller that can't sync there", async () => {
+  it("says what Vercel's API says of a sync it won't make: one that names no Slack channel, a caller that can't sync there", async () => {
     const api = fakeMessageboard({ roles: { u_viewer: 'viewer' } })
-    const sync = { channel: 'deploys', source: 'vercel' as const, events: ['deployment.error'] }
-    await handleOn(api).post('deploys', 'the channel is there')
-    await expect(handleOn(api).createSync({ ...sync, events: ['exploded'] })).rejects.toMatchObject({ status: 400, code: 'invalid_events' })
-    await expect(handleOn(api).createSync({ ...sync, projects: ['no-such-project'] })).rejects.toMatchObject({ status: 400, code: 'invalid_projects' })
-    await expect(handleOn(api, 'project:prj_pong:production').createSync(sync)).rejects.toMatchObject({ status: 403, code: 'sync_needs_person' })
-    await expect(handleOn(api, 'user:u_viewer').createSync(sync)).rejects.toMatchObject({ status: 403 })
+    await handleOn(api).post('alerts', 'the channel is there')
+    await expect(handleOn(api).createSync({ channel: 'alerts', source: 'slack' })).rejects.toMatchObject({ status: 400, code: 'invalid_request' })
+    await expect(handleOn(api, 'user:u_viewer').createSync({ channel: 'alerts', source: 'slack', slack: { channel: '#alerts' } })).rejects.toMatchObject({ status: 403 })
     expect(await handleOn(api).syncs()).toEqual([])
   })
 

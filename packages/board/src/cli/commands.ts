@@ -102,7 +102,6 @@ export const options = {
   tailscale: { type: 'string', multiple: true, value: 'host', description: "also answer requests for this host, the board's name on your tailnet behind tailscale serve: whoever Tailscale says is calling is a person on the board" },
   in: { type: 'string', value: 'duration', description: 'once, this long from now, e.g. 90s, 5m, 1d' },
   at: { type: 'string', value: 'time', description: 'at a time: once, or with --every, the first' },
-  events: { type: 'string', multiple: true, value: 'name', description: "a source's events, by its own names for them" },
   workspace: { type: 'string', value: 'domain|id', description: 'a Slack workspace, for a team with more than one' },
   every: { type: 'string', value: 'duration', description: 'repeating at this interval, e.g. 30m' },
   until: { type: 'string', short: 'u', value: 'time', description: 'repeating until a time' },
@@ -510,16 +509,15 @@ export const commands: readonly (CliCommand & { readonly group: (typeof groups)[
       {
         name: 'target|source',
         required: false,
-        description: "where to sync the thread (slack:#incidents), or what the board syncs the channel with: vercel, or slack/vercel:#channel, a Slack channel through Vercel's Slack app (on Vercel's board)",
+        description: "where to sync the thread (slack:#incidents), or what the board syncs the channel with: slack/vercel:#channel, a Slack channel through Vercel's Slack app (on Vercel's board)",
       },
     ],
-    options: [option('events', "the source's events to bring in, e.g. deployment.error", 'name[,name]'), option('project', "only these projects' events", 'name|id'), option('workspace')],
+    options: [option('workspace')],
     examples: [
       { name: 'list where a thread is synced', value: 'sync 812' },
       { name: 'sync a thread to a Slack channel', value: 'sync 812 slack:#incidents' },
-      { name: "bring a project's failed deployments into a channel", value: 'sync deploys vercel --events deployment.error --project web' },
       { name: 'mirror a Slack channel both ways, once someone there agrees', value: 'sync alerts slack/vercel:#alerts' },
-      { name: "list a channel's syncs", value: 'sync deploys' },
+      { name: "list a channel's syncs", value: 'sync alerts' },
     ],
     runsWithoutSubcommand: true,
     subcommands: [

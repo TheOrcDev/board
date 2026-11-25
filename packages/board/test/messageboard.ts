@@ -57,8 +57,6 @@ type ManagedSync = {
   id: string
   channelId: string
   source: string
-  events?: string[]
-  projectIds?: string[]
   slack?: { workspaceId: string; channelId: string; name?: string }
   state: 'pending' | 'active' | 'paused'
   reason?: string
@@ -1782,7 +1780,7 @@ function fakeBoard(shared: Shared, boardId: string) {
     return message.id
   }
 
-  /** The syncs Vercel's API runs itself: made by a person who may `sync` where its events land, for events Vercel has. */
+  /** The syncs Vercel's API runs itself: a Slack channel's mirror, made by whoever may `sync` in the board's channel. */
   function syncsRoute(method: string, rest: string, actor: Actor, body: Record<string, any>, url: URL): unknown {
     let found: RegExpExecArray | null
     if (method === 'POST' && rest === '/syncs') {
@@ -1790,46 +1788,22 @@ function fakeBoard(shared: Shared, boardId: string) {
       need(actor, 'sync', body.channelId)
       const made = managedSyncOperations.get(`${actor.id}|${body.operationId}`)
       if (made) return { sync: managedSyncs.get(made) }
-      const keep = (sync: ManagedSync) => {
-        managedSyncs.set(sync.id, sync)
-        managedSyncOperations.set(`${actor.id}|${body.operationId}`, sync.id)
-        return { sync }
-      }
-      const id = `syn_${randomUUID().replaceAll('-', '').slice(0, 24)}`
-      if (body.source === 'slack') {
-        if (!body.slack) throw new Refused(400, 'invalid_request', 'A `slack` sync names the channel it mirrors: `slack`, with its `channel`.')
-        // Vercel's Slack app finds the channel and asks it: nothing syncs until someone there agrees.
-        const name = String(body.slack.channel).replace(/^#/, '')
-        return keep({
-          id,
-          channelId: body.channelId,
-          source: 'slack',
-          slack: { workspaceId: body.slack.workspace ?? 'T0ACME', channelId: `C0${name.toUpperCase().replace(/[^A-Z0-9]/g, '')}`, name },
-          state: 'pending',
-          reason: 'waiting for the channel to agree',
-          createdBy: actor.id,
-          createdAt: now(),
-        })
-      }
-      if (!body.events) throw new Refused(400, 'invalid_request', 'A `vercel` sync names the events to bring in: `events`.')
-      if (actor.principal.type !== 'user') throw new Refused(403, 'sync_needs_person', 'A `vercel` sync makes a webhook as whoever asks for it, so a person asks.')
-      const unknown = (body.events as string[]).filter((name) => !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(name))
-      if (unknown.length > 0) throw new Refused(400, 'invalid_events', `Vercel has no event named ${unknown.join(', ')}.`)
-      // A project by its ID or its name, as a grant names one: the sync keeps its ID.
-      const named = (body.projects ?? []) as string[]
-      const projectIds = named.map((given) => (given in shared.directory.projects ? given : Object.entries(shared.directory.projects).find(([, name]) => name === given)?.[0]))
-      const missing = named.filter((_, at) => projectIds[at] === undefined)
-      if (missing.length > 0) throw new Refused(400, 'invalid_projects', `This team has no project ${missing.join(', ')}.`)
-      return keep({
-        id,
+      if (body.source !== 'slack' || !body.slack) throw new Refused(400, 'invalid_request', 'A sync names the Slack channel it mirrors: `source: "slack"`, and `slack` with its `channel`.')
+      // Vercel's Slack app finds the channel and asks it: nothing syncs until someone there agrees.
+      const name = String(body.slack.channel).replace(/^#/, '')
+      const sync: ManagedSync = {
+        id: `syn_${randomUUID().replaceAll('-', '').slice(0, 24)}`,
         channelId: body.channelId,
-        source: body.source,
-        events: body.events,
-        ...(body.projects ? { projectIds: [...new Set(projectIds as string[])] } : {}),
-        state: 'active',
+        source: 'slack',
+        slack: { workspaceId: body.slack.workspace ?? 'T0ACME', channelId: `C0${name.toUpperCase().replace(/[^A-Z0-9]/g, '')}`, name },
+        state: 'pending',
+        reason: 'waiting for the channel to agree',
         createdBy: actor.id,
         createdAt: now(),
-      })
+      }
+      managedSyncs.set(sync.id, sync)
+      managedSyncOperations.set(`${actor.id}|${body.operationId}`, sync.id)
+      return { sync }
     }
     if (method === 'GET' && rest === '/syncs') {
       const channelId = url.searchParams.get('channelId')
@@ -2525,7 +2499,7 @@ function fakeBoard(shared: Shared, boardId: string) {
   return {
     route,
     registrations,
-    /** The syncs the board runs itself, for a test to say what a source did: a Slack channel agreed, a webhook is gone. */
+    /** The syncs the board runs itself, for a test to say what a source did: a Slack channel agreed, or the app can no longer reach it. */
     managedSyncs,
     schedules,
     send,
@@ -2923,7 +2897,7 @@ export function fakeMessageboard(
 
   const { registrations, managedSyncs, schedules, send, cutNextCompletion } = general.data
   return {
-    /** The default board's own syncs, by ID, for a test to say what a source did: a Slack channel agreed, a webhook is gone. */
+    /** The default board's own syncs, by ID, for a test to say what a source did: a Slack channel agreed, or the app can no longer reach it. */
     managedSyncs,
     /**
      * Ends the default board's next completion after its own write, as a request cut off there does: it readies the
