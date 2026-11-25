@@ -254,14 +254,15 @@ function useSeenThreads(state: State, open: string | null): Seen {
   const newest = (thread: string) =>
     Object.values(state.messages).reduce((at, m) => ((m.re ?? m.id) === thread && m.createdAt > at ? m.createdAt : at), '')
   useEffect(() => {
-    if (seen !== null || state.cursor === null) return
+    // Once the feed has said where it is, or refused to: without a feed, what's loaded is all there is to see.
+    if (seen !== null || (state.cursor === null && state.activityRefused === null)) return
     const first: Seen = {}
     for (const m of Object.values(state.messages)) {
       const thread = m.re ?? m.id
       if (!first[thread] || m.createdAt > first[thread]!) first[thread] = m.createdAt
     }
     save(first)
-  }, [state.cursor, seen === null])
+  }, [state.cursor, state.activityRefused, seen === null])
   useEffect(() => {
     if (!open || seen === null) return
     const at = newest(open)

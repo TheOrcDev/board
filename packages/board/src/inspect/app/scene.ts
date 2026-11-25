@@ -626,7 +626,8 @@ export class World {
     ray.setFromCamera(pointer, this.camera)
     const targets = [...this.houses.values()].map((h) => h.group)
     for (const hit of ray.intersectObjects(targets, true)) {
-      if (!hit.object.visible) continue
+      // The raycaster hits what's hidden too: a lifted roof is hidden by its group, so look up the whole way.
+      if (!shown(hit.object)) continue
       let at: Object3D | null = hit.object
       while (at && !at.userData.thread && !at.userData.house) at = at.parent
       if (at?.userData.thread) return this.onPick({ thread: at.userData.thread })
@@ -1030,6 +1031,12 @@ function hipRoof(w: number, h: number, over: number, rise: number): BufferGeomet
   geometry.setAttribute('position', new Float32BufferAttribute(faces.flat(2), 3))
   geometry.computeVertexNormals()
   return geometry
+}
+
+/** Whether an object is drawn: it and every group it's in are visible. */
+function shown(object: Object3D): boolean {
+  for (let at: Object3D | null = object; at; at = at.parent) if (!at.visible) return false
+  return true
 }
 
 /** A number in [0, 1) for a text, the same every time: where a tree grows, and what kind. */
