@@ -210,6 +210,7 @@ export function App() {
           <Sidebar
             state={state}
             current={current}
+            house={where.params.get('house') || null}
             onCollapse={() => {
               if (nav) setNav(false)
               else sidebar.collapse(true)

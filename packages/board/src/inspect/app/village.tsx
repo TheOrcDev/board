@@ -4,7 +4,7 @@ import { Vector3 } from 'three'
 import { here as hereWith, navigate, useNow } from './nav.tsx'
 import { isTask, stateNow, type State } from './store.ts'
 import { LAYERS, World, type Label, type Picked } from './scene.ts'
-import { boardOf, firstLine, fitted, PLATE, townOf, type House, type Resident, type Seen } from './town.ts'
+import { boardOf, FIRST_VISIT, firstLine, fitted, PLATE, townOf, type House, type Resident, type Seen } from './town.ts'
 import { Header } from './ui.tsx'
 import { ago } from './words.ts'
 
@@ -258,10 +258,15 @@ function useSeenThreads(state: State, open: string | null): Seen {
   }
   const newest = (thread: string) =>
     Object.values(state.messages).reduce((at, m) => ((m.re ?? m.id) === thread && m.createdAt > at ? m.createdAt : at), '')
+  // Marks saved before they kept a first visit get one now: what's older than now is seen.
+  useEffect(() => {
+    if (seen !== null && !Object.hasOwn(seen, FIRST_VISIT)) save({ ...seen, [FIRST_VISIT]: new Date().toISOString() })
+  }, [seen === null])
   useEffect(() => {
     // Once the feed has said where it is, or refused to: without a feed, what's loaded is all there is to see.
     if (seen !== null || (state.cursor === null && state.activityRefused === null)) return
-    const first: Seen = {}
+    // Everything there is now is seen: what's loaded, and what only loads later, by when you came.
+    const first: Seen = { [FIRST_VISIT]: new Date().toISOString() }
     for (const m of Object.values(state.messages)) {
       const thread = m.re ?? m.id
       if (!first[thread] || m.createdAt > first[thread]!) first[thread] = m.createdAt

@@ -112,6 +112,9 @@ export type Unseen = 'mention' | 'new' | null
 /** When you last saw each thread, by its root's ID: kept by the page, in this browser. */
 export type Seen = Record<string, string>
 
+/** In `Seen`, when you first visited: anything written before then you've seen, wherever it loads from later. */
+export const FIRST_VISIT = '*'
+
 export type Street = { name: string; x: number; y: number }
 
 /** A block of the city, with the district it belongs to. */
@@ -398,7 +401,8 @@ function threadsBy(state: State, messages: MessageView[], now: number, seen: See
   const unseen = new Map<string, Unseen>()
   for (const message of messages) {
     const thread = message.re ?? message.id
-    if (message.by.actor === me || message.createdAt <= (Object.hasOwn(seen, thread) ? seen[thread]! : '')) continue
+    const since = Object.hasOwn(seen, thread) ? seen[thread]! : Object.hasOwn(seen, FIRST_VISIT) ? seen[FIRST_VISIT]! : ''
+    if (message.by.actor === me || message.createdAt <= since) continue
     const mentions = me !== undefined && message.text.includes(`@[${me}]`)
     if (mentions) unseen.set(thread, 'mention')
     else if (!unseen.has(thread)) unseen.set(thread, 'new')

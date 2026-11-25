@@ -63,6 +63,8 @@ const SHADOW = { size: 2048, span: 2200 }
 const VIEW = { village: { tilt: (48 * Math.PI) / 180, fov: 30 }, house: { tilt: (34 * Math.PI) / 180, fov: 22 } }
 /** How fast people walk, in the layout's pixels a second. */
 const PACE = 300
+/** The longest a walk takes, in seconds, however far it is. */
+const TRIP = 2
 /** People, to the scale of the houses. */
 const FIGURE_SCALE = 1.6
 /** The farthest the camera starts: a big city is seen a couple of blocks at a time, and you move around it. */
@@ -128,6 +130,8 @@ type PersonThings = {
   at: Vector3
   /** Where they walk to next, in order, each in a house or out on the street: the last is their place. */
   path: Waypoint[]
+  /** How fast they walk the path they're on: a stroll, or quicker for a long way. */
+  pace: number
   /** Their place, and the door of its house, as the layout last gave them. */
   place: Vector3
   door: Vector3
@@ -329,9 +333,11 @@ export class World {
           { to: door.clone(), channel: null },
           { to: place.clone(), channel: resident.channel },
         ]
+        person.pace = paceFor(person.at, person.path)
       } else if (!person.place.equals(place)) {
         // To another table in the same house.
         person.path = [{ to: place.clone(), channel: resident.channel }]
+        person.pace = paceFor(person.at, person.path)
       }
       person.channel = resident.channel
       person.thread = resident.thread
@@ -489,7 +495,7 @@ export class World {
           person.path.shift()
         } else {
           walking = true
-          person.at.add(away.multiplyScalar(Math.min(1, (PACE * dt) / far)))
+          person.at.add(away.multiplyScalar(Math.min(1, (person.pace * dt) / far)))
           person.step += dt * 12
           person.group.rotation.y = Math.atan2(leg.to.x - person.at.x, leg.to.z - person.at.z)
         }
@@ -1004,7 +1010,7 @@ export class World {
     group.scale.setScalar(FIGURE_SCALE)
     group.position.copy(at)
     this.scene.add(group)
-    return { group, body, materials, ring, at: at.clone(), path: [], place: at.clone(), door: door.clone(), facing: resident.facing, seated: resident.seated, agent: resident.agent, step: 0, channel: resident.channel, thread: resident.thread }
+    return { group, body, materials, ring, at: at.clone(), path: [], pace: PACE, place: at.clone(), door: door.clone(), facing: resident.facing, seated: resident.seated, agent: resident.agent, step: 0, channel: resident.channel, thread: resident.thread }
   }
 }
 
@@ -1049,6 +1055,20 @@ function hipRoof(w: number, h: number, over: number, rise: number): BufferGeomet
 function shown(object: Object3D): boolean {
   for (let at: Object3D | null = object; at; at = at.parent) if (!at.visible) return false
   return true
+}
+
+/**
+ * How fast to walk `path` from `at`: a stroll, or as fast as it takes to get there in two seconds, so a trip
+ * across the city doesn't keep you waiting while the camera is already there.
+ */
+function paceFor(at: Vector3, path: Waypoint[]): number {
+  let length = 0
+  let from = at
+  for (const leg of path) {
+    length += from.distanceTo(leg.to)
+    from = leg.to
+  }
+  return Math.max(PACE, length / TRIP)
 }
 
 /** A number in [0, 1) for a text, the same every time: where a tree grows, and what kind. */

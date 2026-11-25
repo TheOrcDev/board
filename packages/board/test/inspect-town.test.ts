@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { MessageView, TaskView } from '../src/api/routes.ts'
 import * as store from '../src/inspect/app/store.ts'
-import { BLOCK, BUBBLE_MS, fitted, GONE_MS, IDLE_MS, signOf, sizeOf, spiral, townOf } from '../src/inspect/app/town.ts'
+import { BLOCK, BUBBLE_MS, FIRST_VISIT, fitted, GONE_MS, IDLE_MS, signOf, sizeOf, spiral, townOf } from '../src/inspect/app/town.ts'
 
 const ME = 'vercel:user:u_julian'
 const ADA = 'vercel:user:u_ada'
@@ -290,6 +290,13 @@ describe('threads you have not seen', () => {
     const tables = Object.fromEntries(town.houses[0]!.tables.map((t) => [t.thread, t.unseen]))
     expect(tables).toEqual({ '1': null, '2': 'new' })
     expect(town.houses[0]!.unseen).toEqual({ threads: 1, mentioned: false })
+  })
+
+  it('counts a thread that loads after your first visit as seen, unless someone wrote in it since', () => {
+    // You first came 40 seconds ago: thread 1 was quiet since, thread 2 heard from fx after.
+    const state = stateOf(['dev'], [...discussion(1, ADA, 'dev', { createdAt: at(60_000) }), ...discussion(2, FX, 'dev', { createdAt: at(10_000) })])
+    const town = townOf(state, NOW, { seen: { [FIRST_VISIT]: at(40_000) } })
+    expect(Object.fromEntries(town.houses[0]!.tables.map((t) => [t.thread, t.unseen]))).toEqual({ '1': null, '2': 'new' })
   })
 
   it('marks a mention of you over a plain new reply, and never what you wrote yourself', () => {

@@ -11,7 +11,7 @@ import { boardWords, shownName } from './words.ts'
 
 // --- sidebar -------------------------------------------------------------------------
 
-function useSeen(state: State, current: Route): Record<string, number> {
+function useSeen(state: State, open: string | null): Record<string, number> {
   const storage = `board.seen:${state.discovery?.url ?? location.host}`
   const [seen, setSeen] = useState<Record<string, number>>(() => {
     try {
@@ -33,15 +33,21 @@ function useSeen(state: State, current: Route): Record<string, number> {
       save(Object.fromEntries(channels.map((channel) => [channel.path, channel.lastIndex ?? 0])))
   }, [state.channels])
   useEffect(() => {
-    if (current.view !== 'channel') return
-    const channel = state.channels[current.channel]
+    if (open === null) return
+    const channel = state.channels[open]
     if (channel?.lastIndex !== undefined && (seen[channel.path] ?? 0) < channel.lastIndex) save({ ...seen, [channel.path]: channel.lastIndex })
-  }, [current, state.channels])
+  }, [open, state.channels])
   return seen
 }
 
-export function Sidebar({ state, current, onCollapse }: { state: State; current: Route; onCollapse: () => void }) {
-  const seen = useSeen(state, current)
+/**
+ * The board's channels. In Boardville a channel is a house: its link walks you into the house instead of
+ * leaving for the channel's page, and the house you're in (`house`) is the channel that's open.
+ */
+export function Sidebar({ state, current, house, onCollapse }: { state: State; current: Route; house: string | null; onCollapse: () => void }) {
+  const town = current.view === 'town'
+  const showing = current.view === 'channel' ? current.channel : town ? house : null
+  const seen = useSeen(state, showing)
   const groups = useMemo(() => {
     const out = new Map<string, ChannelView[]>()
     for (const channel of Object.values(state.channels).sort((a, b) => a.path.localeCompare(b.path))) {
@@ -88,7 +94,7 @@ export function Sidebar({ state, current, onCollapse }: { state: State; current:
           <section key={group}>
             {group !== 'channels' && <h2>{group}</h2>}
             {channels.map((channel) => {
-              const active = current.view === 'channel' && current.channel === channel.path
+              const active = showing === channel.path
               // Only where the board keeps a channel's last position: Vercel's API doesn't.
               const unread = !active && (channel.lastIndex ?? 0) > (seen[channel.path] ?? Number.POSITIVE_INFINITY)
               return (
@@ -101,7 +107,7 @@ export function Sidebar({ state, current, onCollapse }: { state: State; current:
                     </>
                   }
                 >
-                  <Link to={`/c/${channel.path}`} className={`item${unread ? ' unread' : ''}`} current={active} title={channel.path}>
+                  <Link to={town ? `/town?house=${encodeURIComponent(channel.path)}` : `/c/${channel.path}`} className={`item${unread ? ' unread' : ''}`} current={active} title={channel.path}>
                     <span className="name">#{channel.path.slice(channel.path.lastIndexOf('/') + 1)}</span>
                     {unread ? <i className="dot" /> : channel.threads !== undefined ? <span className="count">{channel.threads}</span> : null}
                   </Link>
