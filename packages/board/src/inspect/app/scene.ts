@@ -543,6 +543,7 @@ export class World {
       const p = at.clone().project(this.camera)
       const x = ((p.x + 1) / 2) * width
       const y = ((1 - p.y) / 2) * height
+      let dy = 0
       let shown = !(p.z > 1 || p.x < -1.2 || p.x > 1.2 || p.y < -1.2 || p.y > 1.2) && !(label.rank === 0 && this.distance > QUIET_SIGNS)
       // A label as wide as a stretch of the scene, a table's: as many pixels as that stretch spans at its point.
       const span = Number(element.dataset.span)
@@ -562,12 +563,21 @@ export class World {
         const below = element.classList.contains('below')
         const centered = element.classList.contains('centered')
         const top = centered ? y - size.height / 2 : below ? y : y - size.height
-        const box = { left: x - size.width / 2 - 3, right: x + size.width / 2 + 3, top: top - 2, bottom: top + size.height + 2 }
-        if (label.rank !== undefined) shown = !taken.some((t) => box.left < t.right && box.right > t.left && box.top < t.bottom && box.bottom > t.top)
-        if (shown) taken.push(box)
+        const boxAt = (shift: number) => ({ left: x - size.width / 2 - 3, right: x + size.width / 2 + 3, top: top + shift - 2, bottom: top + shift + size.height + 2 })
+        const free = (box: ReturnType<typeof boxAt>) => !taken.some((t) => box.left < t.right && box.right > t.left && box.top < t.bottom && box.bottom > t.top)
+        // A ranked label that would land on another moves down a step or two, then up, before it gives way.
+        const step = size.height + 4
+        // One with no rank always shows, where it is; one painted on something (`data-fixed`) never moves off it.
+        const moves = element.dataset.fixed === undefined ? [0, step, 2 * step, -step, -2 * step] : [0]
+        const fits = label.rank === undefined ? 0 : moves.find((at) => free(boxAt(at)))
+        shown = fits !== undefined
+        if (shown) {
+          dy = fits!
+          taken.push(boxAt(dy))
+        }
       }
       element.style.visibility = shown ? 'visible' : 'hidden'
-      element.style.transform = `translate(${x}px, ${y}px)`
+      element.style.transform = `translate(${x}px, ${y + dy}px)`
     }
   }
 

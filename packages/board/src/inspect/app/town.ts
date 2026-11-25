@@ -479,7 +479,7 @@ export function fitted(names: string[], room = 16): string {
  */
 export function boardOf(house: Pick<House, 'width'>): { width: number; height: number; bottom: number; z: number } {
   const width = Math.min(house.width - 90, 420)
-  return { width, height: Math.min(140, 80 + width * 0.15), bottom: 132, z: WALL + 6 }
+  return { width, height: Math.min(140, 80 + width * 0.15), bottom: 175, z: WALL + 6 }
 }
 
 /** A house's roof color, the same for a channel every time: one of a few, by its name. */

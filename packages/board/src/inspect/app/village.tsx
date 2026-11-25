@@ -54,7 +54,11 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
     if (element) labels.current.set(key, { element, anchor, ...(rank === undefined ? {} : { rank }) })
     else labels.current.delete(key)
   }
-  /** Of two labels that would overlap, the one that shows: who's in a house first, then the busiest houses' signs. */
+  /**
+   * Of two labels that would overlap, the one that shows: inside the house you're in, its whiteboard (10); then what
+   * you haven't seen (9), each table's label (8), and who sits at it and what they say (7); then the signs and roofs
+   * of the houses around it, the busiest first.
+   */
   const rankOf = (h: House) => (h.channel === house ? 5 : h.who.length > 0 ? 3 : h.tasks > 0 ? 1 : 0)
   // What the newest speaker in a house said, for a house whose roof is on: it shows over the roof.
   const said = new Map(town.residents.filter((r) => r.bubble).map((r) => [r.channel, r]))
@@ -91,7 +95,7 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
           {town.houses
             .filter((h) => h.channel !== house && h.unseen.threads > 0)
             .map((h) => (
-              <div key={`quest:${h.channel}`} className="over" ref={over(`quest:${h.channel}`, () => new Vector3(h.x + h.width / 2, 340, h.y + h.depth / 2), 5)}>
+              <div key={`quest:${h.channel}`} className="over" ref={over(`quest:${h.channel}`, () => new Vector3(h.x + h.width / 2, 340, h.y + h.depth / 2), 9)}>
                 <div className="stack">
                 <button className={`quest${h.unseen.mentioned ? ' mention' : ''}`} onClick={() => enter(h.channel)} title={`${h.unseen.threads} thread${h.unseen.threads === 1 ? '' : 's'} you haven't seen in #${h.channel}${h.unseen.mentioned ? ', one mentioning you' : ''}`}>
                   <b>{h.unseen.mentioned ? '@' : '!'}</b>
@@ -104,12 +108,13 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
           {open && <Whiteboard house={open} state={state} now={now} attach={over(`board:${open.channel}`, () => {
             const board = boardOf(open)
             return new Vector3(open.x + open.width / 2, LAYERS.floor + board.bottom + board.height / 2, open.y + board.z + 3)
-          }, 2)} />}
+          // Over every sign and pill of the houses behind it: it's the room's own.
+          }, 10)} />}
           {/* At an empty table on its own, just over it; at one with people, in their pill. */}
           {open?.tables
             .filter((table) => table.unseen !== null && table.seated === 0)
             .map((table) => (
-              <div key={`quest:${table.thread}`} className="over" ref={over(`quest:${table.thread}`, () => new Vector3(table.x + 70, 60, table.y + 17), 5)}>
+              <div key={`quest:${table.thread}`} className="over" ref={over(`quest:${table.thread}`, () => new Vector3(table.x + 70, 60, table.y + 17), 9)}>
                 <div className="stack">
                 <button className={`quest${table.unseen === 'mention' ? ' mention' : ''}`} onClick={() => navigate(hereWith({ thread: table.thread }))} title={table.unseen === 'mention' ? 'you were mentioned here since you last looked' : "new since you last looked"}>
                   <b>{table.unseen === 'mention' ? '@' : '!'}</b>
@@ -138,8 +143,8 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
               </div>
             ))}
           {open?.tables.map((table) => (
-            // What the thread is, on its tabletop: under the faces of who sits behind it, and on no other table.
-            <div key={`table:${table.thread}`} className="over centered table-label" data-span="140" ref={over(`table:${table.thread}`, () => new Vector3(table.x + 70, 26, table.y + 17), table.seated > 0 ? 2 : 0)}>
+            // What the thread is, on its tabletop: placed before who sits there and what they say, which move up out of its way.
+            <div key={`table:${table.thread}`} className="over centered table-label" data-span="140" ref={over(`table:${table.thread}`, () => new Vector3(table.x + 70, 26, table.y + 17), 8)}>
               <button onClick={() => navigate(hereWith({ thread: table.thread }))} title="open the thread">
                 <span className="label">{table.label || 'a thread'}</span>
                 {table.task && <span className={`state ${table.task}`}>{table.task}</span>}
@@ -152,7 +157,7 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
             const speaker = seated.find((r) => r.bubble)
             return (
               // Who sits at a table, in one pill over their heads, as a room's names show over it.
-              <div key={`seats:${table.thread}`} className="over" data-span="160" ref={over(`seats:${table.thread}`, () => new Vector3(table.x + 70, 86, table.y - 24), 3)}>
+              <div key={`seats:${table.thread}`} className="over" data-span="160" ref={over(`seats:${table.thread}`, () => new Vector3(table.x + 70, 86, table.y - 24), 7)}>
                 <div className="stack">
                   {speaker && (
                     <button className="bubble" onClick={() => navigate(hereWith({ thread: speaker.bubble!.thread }))} title="open the thread">
@@ -178,7 +183,7 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
           })}
           {town.residents.map((r) => (
             // Everyone on their feet, standing or walking, has a pill of their own; who's seated is in their table's.
-            <PersonLabel key={`person:${r.actor}`} resident={r} attach={over(`person:${r.actor}`, () => (world.current?.settled(r.actor) && r.channel === house ? null : (world.current?.personAt(r.actor) ?? null)), r.you ? 6 : 3)} />
+            <PersonLabel key={`person:${r.actor}`} resident={r} attach={over(`person:${r.actor}`, () => (world.current?.settled(r.actor) && r.channel === house ? null : (world.current?.personAt(r.actor) ?? null)), r.you ? 7 : 3)} />
           ))}
         </div>
       </div>
@@ -210,7 +215,7 @@ function Whiteboard({ house, state, now, attach }: { house: House; state: State;
   const threads = [...latest].sort((a, b) => (a[1] < b[1] ? 1 : -1)).slice(0, 3)
   const tasks = tally.ready + tally.claimed + tally.waiting + tally.done
   return (
-    <div className="over centered" data-span={boardOf(house).width - 14} ref={attach}>
+    <div className="over centered" data-fixed data-span={boardOf(house).width - 14} ref={attach}>
       <div className="whiteboard">
         <h3>#{house.name}</h3>
         {tasks > 0 && (
