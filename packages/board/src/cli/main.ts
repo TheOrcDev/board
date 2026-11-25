@@ -248,6 +248,8 @@ let warnings: Warning[] = []
 let bareMentions: string | undefined
 /** The board this run reached by its URL, for a failure to name. */
 let reached: string | null = null
+/** The task `tasks run` holds, once it's claimed one: with --ready, the command line names only its channel. */
+let runTask: string | undefined
 /** The team whose default board this run reached, nothing naming one of its boards: `--scope`'s, or the one the environment finds. */
 let teamDefault: { team: string | undefined } | null = null
 /** Where the credential this run sent came from, as `whoami` says it, for a refusal to say which to replace. */
@@ -309,6 +311,16 @@ function parse(argv: string[]) {
   const known = specOf(word) && new Set(optionsOf(word))
   const foreign = known && ordered.find((option) => !known.has(option.name))
   if (foreign) throw foreignOption(foreign.name, word!)
+  // And one only another task verb takes (`tasks complete --file`, a plan's for `tasks create`), which
+  // that verb would drop. grants says itself where each of its subcommands' options goes.
+  const sub = word === 'tasks' ? subcommandOf(word) : undefined
+  const theirs = sub && new Set([...sub.options, ...(sub.filters ? filterOptions : []), ...globalOptions].map((option) => option.name))
+  const elsewhere = theirs && ordered.find((option) => !theirs.has(option.name))
+  if (elsewhere)
+    throw usage(`Unknown option --${elsewhere.name} for ${named()} ${word} ${sub.name}.`, {
+      reason: 'unknown_option',
+      next: [{ instruction: 'See all options', argv: [...cli(), word!, sub.name, '--help'] }],
+    })
   // What was found is what runs. A command's own reading of an option can leave another word first
   // (`--claim delete tasks`: a value until `tasks` is found, none after), and whoever screened the
   // command, as vb() does for the ones it refuses, screened the one found.
@@ -396,6 +408,14 @@ function parseFailure(error: Error & { code?: string }, argv: string[], word: st
 /** The command `word` names, board's or the app's, as help shows it. */
 const specOf = (word: string | undefined): CliCommand | undefined =>
   word === undefined ? undefined : [...commands, ...Object.values(app.commands).map((own) => own.spec)].find((known) => known.name === word)
+
+/** The subcommand of `word`'s command this run names, right after the command, by its name or an alias. */
+function subcommandOf(word: string | undefined): CliCommand | undefined {
+  const command = specOf(word)
+  if (!command?.subcommands || command.argumentsBeforeSubcommand) return undefined
+  const named = positionals[1]
+  return command.subcommands.find((sub) => sub.name === named || (sub.aliases ?? []).includes(named ?? ''))
+}
 
 function optionsOf(word: string | undefined): string[] {
   const command = specOf(word)
@@ -1044,6 +1064,10 @@ function failureOf(error: unknown): Failure {
       ]),
       details: [],
     }
+  // A task's result or reason over what the board keeps, in its own words (each board says it its way, with its own limit):
+  // the full report goes in a reply in the task's thread, and the note in a line or two.
+  const note = status === 400 ? taskNoteTooLong(message) : null
+  if (note) return { ...theirs('limit', 'payload_too_large', `Can't ${doing()}. Its ${note} is too long for the board.`, note === 'result' ? noteRecovery('report') : noteRecovery('detail')) }
   // A limit on the team's boards, which the team's plan sets: no argument fixes it, and the team's own board is still there.
   if (code === 'too_many_boards')
     return theirs(
@@ -1066,23 +1090,13 @@ function failureOf(error: unknown): Failure {
     return theirs('limit', code, `Can't ${doing()}. This team's plan has no private boards.`, [
       { instruction: 'Keep the board open to the whole team, or move the team to a plan with private boards' },
     ])
+  // A profile the board refused (--as, BOARD_PROFILE): its rule is the board's, in its words under the headline.
+  if (status === 400 && code === 'invalid_profile') return theirs('usage', code, `Can't ${doing()}. The board doesn't take that profile.`)
   // What the board said is what to fix.
   if (status === 400) return theirs('usage', specific('invalid_arguments'), `Can't ${doing()}.`)
-  if (status === 401)
-    return theirs(
-      'auth',
-      'login_required',
-      "The board didn't accept your credentials.",
-      // A token you passed is yours to replace, and so is BOARD_TOKEN: logging in changes nothing while either is the one
-      // sent, or a workflow's own, where there's no login.
-      sent() === PASSED
-        ? [{ instruction: 'Pass a token it accepts' }]
-        : sent() === 'BOARD_TOKEN'
-          ? [{ instruction: 'Pass a token it accepts in BOARD_TOKEN, or unset it' }]
-          : sent() === 'GitHub Actions OIDC'
-            ? [{ instruction: 'Pass a token it accepts in BOARD_TOKEN' }]
-            : [{ instruction: 'Log in again', argv: ['vercel', 'login'] }],
-    )
+  if (status === 401) return theirs('auth', 'login_required', "The board didn't accept your credentials.", loginRecoveries())
+  // A team's SAML session that lapsed: a new login reaches it again, where a grant changes nothing.
+  if (status === 403 && code === 'reauthentication_required') return theirs('auth', 'login_required', 'Your team needs you to log in again.', loginRecoveries())
   if (status === 403) return theirs('permission', 'permission_denied', `You can't ${doing()}.`, refusedRecoveries())
   if (status === 404) {
     const thing = missing()
@@ -1131,6 +1145,19 @@ const onThisBoard = (): string[] => [
   ...(flags.name !== undefined ? ['--name', flags.name] : []),
   ...(flags.as ? ['--as', flags.as] : []),
 ]
+
+/**
+ * Where to go when the board won't take the credential sent: a token you passed is yours to replace, and so is
+ * BOARD_TOKEN: logging in changes nothing while either is the one sent, or a workflow's own, where there's no login.
+ */
+const loginRecoveries = (): Recovery[] =>
+  sent() === PASSED
+    ? [{ instruction: 'Pass a token it accepts' }]
+    : sent() === 'BOARD_TOKEN'
+      ? [{ instruction: 'Pass a token it accepts in BOARD_TOKEN, or unset it' }]
+      : sent() === 'GitHub Actions OIDC'
+        ? [{ instruction: 'Pass a token it accepts in BOARD_TOKEN' }]
+        : [{ instruction: 'Log in again', argv: ['vercel', 'login'] }]
 
 /** Where to go from a 403: what you may do on this board, and who can let you do more. */
 const refusedRecoveries = (): Recovery[] => [
@@ -2633,6 +2660,7 @@ async function tasks(args: string[]): Promise<number> {
     const claim = await claimFor(board, claims, before[0], 'run')
     if (typeof claim === 'number') return claim
     const id = claim.task.id
+    runTask = id
     const lease = seconds('lease')
     const ran = await runCommand(command, {
       env: { ...process.env, BOARD_TASK: id },
@@ -2782,6 +2810,29 @@ async function tasks(args: string[]): Promise<number> {
       return 0
     }
   }
+}
+
+/** Which note a board refused as too long, from its words: `result: a task's result is at most 1,000 characters` here, `result should NOT be longer than 1000 characters` on Vercel's. Null for anything else, and off a task's settling. */
+function taskNoteTooLong(said: string): 'result' | 'reason' | null {
+  const { command, args } = current
+  if (command !== 'tasks' || !['run', 'complete', 'fail', 'block', 'cancel'].includes(args[0] ?? '')) return null
+  const what = /^\s*(result|reason)\b/i.exec(said)?.[1]?.toLowerCase()
+  if ((what !== 'result' && what !== 'reason') || !/(at most|longer than|too long)/i.test(said)) return null
+  return what
+}
+
+/** Where a too-long task note goes: the whole of it in a reply in the task's thread, then the settling again with a line or two. */
+function noteRecovery(whole: 'report' | 'detail'): Recovery[] {
+  const { args } = current
+  const named = args[1] !== undefined && isMessageRef(args[1]) ? messageId(args[1]) : '<ID>'
+  const id = args[0] === 'run' ? (runTask ?? named) : named
+  // A run's command already ran: what's left is completing the task it holds, not running it again.
+  const verb = args[0] === 'run' ? 'complete' : args[0]!
+  // On the same board, as the same profile, whose claim it is.
+  return [
+    { instruction: `Reply the full ${whole} in the task's thread`, argv: [...cli(), 'reply', id, '-', ...onThisBoard()] },
+    { instruction: `Then ${verb} it with a line or two`, argv: [...cli(), 'tasks', verb, id, '<A LINE OR TWO>', ...onThisBoard()] },
+  ]
 }
 
 /** How a board's own word about a task reads from here: the headline, and the way on. Null for any other code. */
@@ -2983,6 +3034,7 @@ async function runOnce(argv: string[], options: App): Promise<number> {
   teamDefault = null
   sent = () => null
   sentLength = 0
+  runTask = undefined
   self = null
   try {
     parse(argv)

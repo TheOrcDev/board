@@ -980,6 +980,13 @@ describe('vercel()', () => {
     }
   })
 
+  it("says a lapsed SAML session needs a new login, as Vercel's API refuses a SAML team with, not a grant", async () => {
+    const lapsed = (async () =>
+      Response.json({ error: { code: 'forbidden', message: 'Not authorized', saml: true, teamId: 'team_test', scope: 'test', enforced: true } }, { status: 403 })) as typeof fetch
+    const team = board({ backend: vercel({ team: 'team_test', api: API, fetch: lapsed, files: fakeMessageboard().files }) })
+    await expect(team.me()).rejects.toMatchObject({ status: 403, code: 'reauthentication_required' })
+  })
+
   it("names a message's channel from the message's own answer where the API sends it, asking for no channel", async () => {
     const api = fakeMessageboard({ channelNames: true })
     const team = handleOn(api)
@@ -3549,6 +3556,24 @@ describe('a request the API puts off', () => {
     // A wait under the whole minute is the API's own, and is what it says.
     expect(await refused({ 'retry-after': '7' })).toMatchObject({ retryAfter: 7 })
     expect(await refused(() => ({ 'retry-after': '60', 'x-ratelimit-reset': resetIn(40) }))).toMatchObject({ retryAfter: 40 })
+  })
+
+  it("waits through a gateway's 502 or 504 on a read, as a long-poll's wait sees one", async () => {
+    timers()
+    for (const status of [502, 504]) {
+      let refusals = 0
+      const { julian, sent } = throttled((url, init) => ((init?.method ?? 'GET') === 'GET' && url.pathname.endsWith('/threads') && refusals-- > 0 ? new Response('Bad Gateway', { status }) : null))
+      await julian.post('dev', { text: 'hi' })
+      refusals = 1
+      const before = sent.length
+      const reading = julian.threads({ channel: 'dev' })
+      await vi.advanceTimersByTimeAsync(2000)
+      const { threads } = await reading
+      expect(threads).toHaveLength(1)
+      // The read it refused went again a second later, and was answered.
+      const [refused, again] = sent.slice(before).filter(({ method, path }) => method === 'GET' && path.endsWith('/threads'))
+      expect(again!.at - refused!.at).toBeGreaterThanOrEqual(1000)
+    }
   })
 
   it("answers a 503 at once for a write the API couldn't tell it had seen", async () => {

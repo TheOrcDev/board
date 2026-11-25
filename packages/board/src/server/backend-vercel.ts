@@ -1,11 +1,11 @@
 import type { Protocol } from '../api/protocol.ts'
 import { CHANNELS_LIMIT_DEFAULT, CHANNELS_LIMIT_MAX, LEASE_DEFAULT_S, RegisterBody, type ActorView, type BoardEventView, type ChannelView, type Discovery, type GrantView, type InboxEntry, type MessageView, type RegistrationView, type ScheduleView, type SchemaView, type TaskClaim, type TaskView, type ThreadSummaryView } from '../api/routes.ts'
-import { duration, type ProfileOption } from '../client/client.ts'
+import { duration, refusalCode, type ProfileOption } from '../client/client.ts'
 import { sha256 } from '../client/ids.ts'
 import { IMPORT_BYTES_MAX, MESSAGE_TEXT_MAX, RemoteWatcherId, TASK_LABEL, type Attachment, type Author, type Labels, type TaskState } from '../contract/schemas.ts'
 import type { ExternalAuthor, Link, Origin } from '../contract/external.ts'
 import { blocksIn } from '../contract/blocks.ts'
-import { mentionTerm, mentionTerms, replaceMentions } from '../contract/mentions.ts'
+import { mentionTerm, mentionTerms, meTerms, replaceMentions } from '../contract/mentions.ts'
 import { actorParts, importedHandle, platformProfile, underPrincipal, type Via } from '../contract/profiles.ts'
 import { VERSION } from '../version.ts'
 import { compileAccess, parseCan, parsePattern, PERMISSIONS, type AccessSummary, type Permission } from './access.ts'
@@ -439,6 +439,8 @@ const apiKind = (kind: ApiActorView['kind']): ActorView['kind'] => (kind === 'ap
 
 /** How many more times a request goes out after the API puts it off. */
 const RETRIES = 4
+/** What the API or its gateway answers when it may answer the same request on another try: unavailable, or a gateway's lost answer. */
+const TRANSIENT = new Set([502, 503, 504])
 /** The first wait before sending again, doubling each time. */
 const RETRY_MS = 1000
 
@@ -764,8 +766,8 @@ export function createVercel(options: VercelOptions, environment: VercelEnvironm
 
   /**
    * One request to the API, as `who`. Its errors are the API's own, with its status and code. One the
-   * API puts off (429, or a 503) waits and goes again as it was, so a write keeps its operation ID
-   * and lands once.
+   * API puts off (429, or a 503), or that its gateway lost (502, 504), waits and goes again as it was,
+   * so a write keeps its operation ID and lands once.
    */
   async function api<T>(who: Who, method: string, path: string, init: { query?: Record<string, string | readonly string[] | undefined>; body?: unknown; signal?: AbortSignal; version?: 2 } = {}): Promise<T> {
     // Everything is at version 1 of the API but its task routes, which are version 2.
@@ -783,7 +785,7 @@ export function createVercel(options: VercelOptions, environment: VercelEnvironm
     const tag = method === 'GET' && TAGGED.test(path) ? JSON.stringify([url.href, headers]) : null
     const kept = tag === null ? undefined : tagged.get(tag)
     if (kept) headers['if-none-match'] = kept.etag
-    // A 429 did nothing. A 503 may have: only a request the API can tell it has seen goes again.
+    // A 429 did nothing. A 502, 503 or 504 may have: only a request the API can tell it has seen goes again.
     const repeatable = (method !== 'POST' && method !== 'PATCH') || typeof (init.body as { operationId?: unknown } | undefined)?.operationId === 'string'
     const started = Date.now()
     for (let attempt = 0; ; attempt++) {
@@ -826,14 +828,14 @@ export function createVercel(options: VercelOptions, environment: VercelEnvironm
         }
         return body as T
       }
-      if (attempt < RETRIES && !init.signal?.aborted && (response.status === 429 || (response.status === 503 && repeatable))) {
+      if (attempt < RETRIES && !init.signal?.aborted && (response.status === 429 || (TRANSIENT.has(response.status) && repeatable))) {
         await pause(retryWait(attempt, response.headers.get('retry-after')), init.signal)
         init.signal?.throwIfAborted()
         continue
       }
-      const error = (body as { error?: { code?: string; message?: string; reason?: unknown } } | undefined)?.error
+      const error = (body as { error?: { code?: string; message?: string; reason?: unknown; saml?: unknown } } | undefined)?.error
       if (response.status === 429) throw throttled(response, error?.code ?? 'rate_limited', attempt, Date.now() - started)
-      const refused = new HttpError(response.status, error?.code ?? 'remote_error', error?.message ?? `Vercel's API answered ${response.status}`)
+      const refused = new HttpError(response.status, refusalCode(response.status, error) ?? 'remote_error', error?.message ?? `Vercel's API answered ${response.status}`)
       // What a code says more of: why a claim was lost.
       if (typeof error?.reason === 'string' && /^[a-z_]{1,64}$/.test(error.reason)) reasons.set(refused, error.reason)
       throw refused
@@ -1824,7 +1826,7 @@ export function createVercel(options: VercelOptions, environment: VercelEnvironm
     let prefixes: string[] = []
     if (value === 'me') {
       const found = await api<ApiMe>(who, 'GET', await onBoard(who, '/me'))
-      terms = [found.actor.id, ...(found.view?.handle ? [mentionTerm(found.view.handle)] : [])]
+      terms = meTerms({ id: found.actor.id, handle: found.view?.handle })
     } else {
       terms = [mentionTerm(value)]
       prefixes = [value.includes(':') ? `${value}+` : `${mentionTerm(value)}/`]
@@ -2066,7 +2068,7 @@ export function createVercel(options: VercelOptions, environment: VercelEnvironm
     const named = (profile: ProfileOption): Who['profile'] => {
       if (profile === null) return null
       const name = typeof profile === 'string' ? profile : profile.name
-      if (!PROFILE.test(name)) throw new HttpError(400, 'invalid_request', `as: ${name}: profiles start with a letter and use up to 32 letters, numbers, and hyphens`)
+      if (!PROFILE.test(name)) throw new HttpError(400, 'invalid_profile', `as: ${name}: profiles start with a letter and use up to 32 letters, numbers, and hyphens`)
       return typeof profile === 'string' || !profile.avatar ? { name } : { name, avatar: profile.avatar }
     }
     if (caller.origin.via?.kind === 'client') {

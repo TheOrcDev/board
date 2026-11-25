@@ -6,13 +6,14 @@ import { setEditing } from './chrome.ts'
 import { Composer } from './composer.tsx'
 import { Feed, Toasts } from './feed.tsx'
 import { Messages, Pendings, type RowOptions } from './message.tsx'
-import { here, Link, navigate, route, useLocation, useNow, useTypeToFocus } from './nav.tsx'
+import { here, Link, navigate, route, useLocation, useNow, useTypeToFocus, type Where } from './nav.tsx'
+import { notifyMentions } from './notify.ts'
 import { Settings } from './settings.tsx'
 import { Sidebar } from './sidebar.tsx'
 import { actorFor, TaskCard, taskIds } from './task.tsx'
 import { Tasks } from './tasks.tsx'
 import { FilterButton, FilterChips } from './filters.tsx'
-import { byWritten, channelRows, channelThreads, filtering, isTask, knownLabels, listingOf, matches, profilesOf, recent, thread as threadOf, threadSchedules, type Filter, type State, type Viewer } from './store.ts'
+import { byWritten, channelRows, channelThreads, filtering, isTask, knownLabels, listingOf, matches, namesOf, profilesOf, recent, thread as threadOf, threadSchedules, type Filter, type State, type Viewer } from './store.ts'
 import { Ask, Header, nativeMenu, ResizeHandle, type KnownLabels } from './ui.tsx'
 import { boardWords, cadence, firstLine, until } from './words.ts'
 
@@ -145,6 +146,8 @@ export function App() {
 
   // Served from an app, the page reads nothing until you've named who you post as.
   const [naming, setNaming] = useState(board.needsName)
+  // Mentions of you notify from the first live event on.
+  useEffect(() => notifyMentions(), [])
   useEffect(() => {
     if (!naming) board.boot().catch((error: Error) => setFailed(error.message))
   }, [naming])
@@ -234,7 +237,7 @@ export function App() {
       {where.thread !== null && (
         <aside className="pane" style={{ width: pane.width }}>
           <ResizeHandle side="left" label="resize the thread" onDrag={pane.drag} onDone={pane.done} onStep={pane.step} />
-          <ThreadPane key={where.thread} id={where.thread} state={state} viewer={viewer} now={now} known={known} />
+          <ThreadPane key={where.thread} id={where.thread} target={where.target} state={state} viewer={viewer} now={now} known={known} />
         </aside>
       )}
       <Toasts />
@@ -251,18 +254,6 @@ type Filters = { filter: Filter; setFilter: (filter: Filter) => void; sources: s
 
 function FilterControls({ filters }: { filters: Filters }) {
   return <FilterButton filter={filters.filter} onChange={filters.setFilter} sources={filters.sources} known={filters.known} />
-}
-
-const NAMES = new WeakMap<State['actors'], Record<string, string>>()
-/**
- * Every actor the page knows, by ID, by their own name, which a mention of them reads as: the same
- * record until one of them changes, so a row's text renders once. Not a hook: it's read after the
- * views' early returns.
- */
-function namesOf(state: State): Record<string, string> {
-  let names = NAMES.get(state.actors)
-  if (!names) NAMES.set(state.actors, (names = Object.fromEntries(Object.entries(state.actors).map(([id, actor]) => [id, actor.name]))))
-  return names
 }
 
 function Activity(props: { state: State; options: RowOptions; known: KnownLabels; lead: ReactNode; filters: Filters }) {
@@ -384,7 +375,7 @@ function Channel(props: { channel: string; state: State; options: RowOptions; kn
   )
 }
 
-function ThreadPane(props: { id: string; state: State; viewer: Viewer; now: number; known: KnownLabels }) {
+function ThreadPane(props: { id: string; target: Where['target']; state: State; viewer: Viewer; now: number; known: KnownLabels }) {
   const { id, state, viewer } = props
   const [missing, setMissing] = useState(false)
   useEffect(() => {
@@ -458,7 +449,7 @@ function ThreadPane(props: { id: string; state: State; viewer: Viewer; now: numb
           ))}
         </dl>
       )}
-      <Feed scope={`thread:${id}`} first={id} last={`${t?.replies.at(-1)?.id ?? id}+${t?.pending.length ?? 0}`}>
+      <Feed scope={`thread:${id}`} target={props.target} first={id} last={`${t?.replies.at(-1)?.id ?? id}+${t?.pending.length ?? 0}`}>
         {!t ? (
           <p className="empty">{missing ? 'no such thread' : 'loading…'}</p>
         ) : (

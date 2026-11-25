@@ -192,6 +192,8 @@ a:focus-visible, button:focus-visible, [role='separator']:focus-visible { outlin
 .message { position: relative; display: grid; grid-template-columns: 40px 1fr; gap: 8px; padding: 6px 20px 4px 8px; }
 .message.continued { padding-top: 1px; padding-bottom: 1px; }
 .message.active { background: var(--shade); }
+.message[data-target] { animation: target 2s ease-out; }
+@keyframes target { from { background: var(--accent-transparent); } }
 .message.pending { opacity: 0.5; }
 .message.failed { opacity: 1; }
 .gutter { display: flex; justify-content: center; align-items: flex-start; }
@@ -272,6 +274,8 @@ a:focus-visible, button:focus-visible, [role='separator']:focus-visible { outlin
   line-height: 16px;
 }
 .badge.slack, .badge.github { border-color: var(--accent-transparent); background: none; color: var(--accent); }
+.chips .label { max-width: 100%; }
+.label-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .label:hover, .chip:hover { color: var(--bright); background: var(--shade-hover); }
 .label button { color: var(--faint); display: inline-flex; }
 .label button:hover { color: var(--bright); }
