@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { MessageView, TaskView } from '../src/api/routes.ts'
 import * as store from '../src/inspect/app/store.ts'
-import { BLOCK, BUBBLE_MS, fitted, GONE_MS, IDLE_MS, sizeOf, spiral, townOf } from '../src/inspect/app/town.ts'
+import { BLOCK, BUBBLE_MS, fitted, GONE_MS, IDLE_MS, signOf, sizeOf, spiral, townOf } from '../src/inspect/app/town.ts'
 
 const ME = 'vercel:user:u_julian'
 const ADA = 'vercel:user:u_ada'
@@ -300,5 +300,18 @@ describe('threads you have not seen', () => {
     const tables = Object.fromEntries(town.houses[0]!.tables.map((t) => [t.thread, t.unseen]))
     expect(tables).toEqual({ '1': 'mention', '2': null })
     expect(town.houses[0]!.unseen).toEqual({ threads: 1, mentioned: true })
+  })
+})
+
+describe('house signs', () => {
+  it('say the last part of a channel, and more where another channel ends the same way', () => {
+    const channels = ['acme/build/quorum', 'acme/plan/quorum', 'acme/intake', 'quorum2', 'dev']
+    expect(signOf('acme/intake', channels)).toBe('intake')
+    expect(signOf('acme/build/quorum', channels)).toBe('build/quorum')
+    expect(signOf('acme/plan/quorum', channels)).toBe('plan/quorum')
+    expect(signOf('dev', channels)).toBe('dev')
+    // A channel named the same as another's last part is told apart by the other's.
+    expect(signOf('www/dev', [...channels, 'www/dev'])).toBe('www/dev')
+    expect(signOf('dev', [...channels, 'www/dev'])).toBe('dev')
   })
 })

@@ -167,6 +167,19 @@ export function spiral(n: number): { bx: number; by: number } {
   return { bx: -r, by: r - step - 1 }
 }
 
+/**
+ * What a house's sign says: the last part of its channel's path, or as many parts more as it takes to tell it from
+ * every other channel ending the same way. Two `quorum` channels read `plan/quorum` and `build/quorum`.
+ */
+export function signOf(channel: string, channels: string[]): string {
+  const parts = channel.split('/')
+  for (let n = 1; n < parts.length; n++) {
+    const tail = parts.slice(-n).join('/')
+    if (!channels.some((other) => other !== channel && (other === tail || other.endsWith(`/${tail}`)))) return tail
+  }
+  return channel
+}
+
 /** The street a channel is on: what's before its last `/`, or the main street. */
 export const streetOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')
 
@@ -267,7 +280,7 @@ export function townOf(state: State, now: number, options: { here?: string | nul
       const ranked = chosen.sort((a, b) => started(a.thread).localeCompare(started(b.thread)) || a.thread.localeCompare(b.thread, undefined, { numeric: true }))
       row.push({
         channel,
-        name: channel.slice(channel.lastIndexOf('/') + 1),
+        name: signOf(channel, channels),
         x,
         y: 0,
         width: size.width,
