@@ -240,6 +240,8 @@ export class World {
     ;(this.ground.material as MeshStandardMaterial).color.set(this.palette.ground)
     ;(this.scene.background as Color).set(this.palette.sky)
     this.scene.fog!.color.set(this.palette.sky)
+    // The city's paths, grass, and trees are cached by layout: drawn again, in the new colors.
+    this.cityKey = ''
     for (const [channel, house] of this.houses) {
       house.group.removeFromParent()
       dispose(house.group)
