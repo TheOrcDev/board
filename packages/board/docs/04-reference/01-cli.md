@@ -1327,16 +1327,16 @@ With a channel in place of a message, it is about the syncs the board runs
 itself, on Vercel's board: alone, it lists the channel's; with a source, it
 makes one; and `remove` stops one by its ID. The source is
 `slack/vercel:#channel`, which mirrors a Slack channel both ways through
-Vercel's Slack app, once someone in that channel agrees. Each takes `sync` in
-the channel.
+Vercel's Slack app, once someone in that channel accepts it with the command
+the sync's reason gives. Each takes `sync` in the channel.
 
 ```text
 $ vb sync alerts slack/vercel:#alerts
-syn_9c2f7b  alerts  slack/vercel:#alerts  pending: waiting for the channel to agree
+syn_9c2f7b  alerts  slack/vercel:#alerts  pending: waiting for the channel to agree. Run this there: /vercel board sync accept syn_9c2f7b
 $ vb sync alerts
-syn_9c2f7b  alerts  slack/vercel:#alerts  pending: waiting for the channel to agree
+syn_9c2f7b  alerts  slack/vercel:#alerts  pending: waiting for the channel to agree. Run this there: /vercel board sync accept syn_9c2f7b
 $ vb sync remove syn_9c2f7b
-removed syn_9c2f7b  alerts  slack/vercel:#alerts  pending: waiting for the channel to agree
+removed syn_9c2f7b  alerts  slack/vercel:#alerts  pending: waiting for the channel to agree. Run this there: /vercel board sync accept syn_9c2f7b
 ```
 
 With `--json`, making one prints `{ sync, outcome }`, where `outcome` is
@@ -1352,8 +1352,8 @@ vb syncs [channel]
 Lists the syncs the board runs itself, oldest first: every channel's, or one's.
 A row is a sync's ID, its channel, and what it syncs with, as the command that
 made it says it. One that isn't running ends with its state and why:
-`pending: waiting for the channel to agree`,
-`paused: Vercel's Slack app can no longer reach the channel`.
+`pending: waiting for the channel to agree. Run this there: /vercel board sync accept <id>`,
+`paused: Vercel's Slack app can no longer reach the channel. Once it's back in it, mirror the channel again.`
 
 ### sources
 

@@ -34,13 +34,13 @@ and picture, replies in their threads. It needs Vercel's Slack app connected to 
 Slack channel. A team with more than one Slack workspace names one with
 `--workspace <domain|id>`.
 
-A channel's content is its members' to share. So a mirror asked for from
-outside the Slack channel is `pending`, and nothing syncs, until someone in the
-channel agrees: the app asks there. Asked for from inside the channel, it starts
-at once:
+A channel's content is its members' to share. So a mirror is `pending`, and
+nothing syncs, until someone in the Slack channel accepts it there. `vb sync`
+prints the command to paste into the channel:
 
 ```text
-/vercel board sync alerts
+$ vb sync alerts slack/vercel:#alerts
+syn_9c2f7b  alerts  slack/vercel:#alerts  pending: waiting for the channel to agree. Run this there: /vercel board sync accept syn_9c2f7b
 ```
 
 A board mirrors a Slack channel once. To mirror a Slack channel with an app and
@@ -54,8 +54,8 @@ a sync function of your own, see [Slack](./03-slack.md).
 ```text
 $ vb syncs
 syn_4f9a2c  support  slack/vercel:#support
-syn_9c2f7b  alerts   slack/vercel:#alerts  pending: waiting for the channel to agree
-syn_1b77e0  ops      slack/vercel:#ops  paused: Vercel's Slack app can no longer reach the channel
+syn_9c2f7b  alerts   slack/vercel:#alerts  pending: waiting for the channel to agree. Run this there: /vercel board sync accept syn_9c2f7b
+syn_1b77e0  ops      slack/vercel:#ops  paused: Vercel's Slack app can no longer reach the channel. Once it's back in it, mirror the channel again.
 ```
 
 | State | What it means |
@@ -64,8 +64,9 @@ syn_1b77e0  ops      slack/vercel:#ops  paused: Vercel's Slack app can no longer
 | `pending` | It never started: its source has yet to agree to it, as a Slack channel must. |
 | `paused` | It ran, and its source is gone: Vercel's Slack app can no longer reach the channel. |
 
-A paused Slack mirror starts again when the app is back in the channel and
-someone there runs `/vercel board sync` for the same board channel.
+A mirror that isn't running gives way to one asked for again in the same
+channel. So once the app is back in the Slack channel, a paused mirror starts
+again with the `vb sync` that made it, accepted like a new one.
 
 ## From code
 
@@ -77,7 +78,7 @@ import { board } from '@vercel/board'
 const team = board()
 
 const mirror = await team.createSync({ channel: 'alerts', source: 'slack', slack: { channel: '#alerts' } })
-mirror.state // 'pending', with mirror.reason: 'waiting for the channel to agree'
+mirror.state // 'pending', with mirror.reason: what it waits for, and the command that starts it
 
 await team.syncs({ channel: 'alerts' }) // [{ id, channel, source, slack, state, reason, by, createdAt }]
 await team.removeSync(mirror.id)

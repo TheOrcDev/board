@@ -1791,13 +1791,14 @@ function fakeBoard(shared: Shared, boardId: string) {
       if (body.source !== 'slack' || !body.slack) throw new Refused(400, 'invalid_request', 'A sync names the Slack channel it mirrors: `source: "slack"`, and `slack` with its `channel`.')
       // Vercel's Slack app finds the channel and asks it: nothing syncs until someone there agrees.
       const name = String(body.slack.channel).replace(/^#/, '')
+      const id = `syn_${randomUUID().replaceAll('-', '').slice(0, 24)}`
       const sync: ManagedSync = {
-        id: `syn_${randomUUID().replaceAll('-', '').slice(0, 24)}`,
+        id,
         channelId: body.channelId,
         source: 'slack',
         slack: { workspaceId: body.slack.workspace ?? 'T0ACME', channelId: `C0${name.toUpperCase().replace(/[^A-Z0-9]/g, '')}`, name },
         state: 'pending',
-        reason: 'waiting for the channel to agree',
+        reason: `waiting for the channel to agree. Run this there: /vercel board sync accept ${id}`,
         createdBy: actor.id,
         createdAt: now(),
       }

@@ -1931,7 +1931,7 @@ describe('vercel()', () => {
       source: 'slack',
       slack: { workspace: 'T0ACME', channel: 'C0ALERTS', name: 'alerts' },
       state: 'pending',
-      reason: 'waiting for the channel to agree',
+      reason: expect.stringMatching(/^waiting for the channel to agree\. Run this there: \/vercel board sync accept syn_\w+$/),
       by: 'vercel:user:u_jb',
       createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
     })
@@ -1955,7 +1955,7 @@ describe('vercel()', () => {
       source: 'slack',
       slack: { workspace: 'T0ACME', channel: 'C0ALERTS', name: 'alerts' },
       state: 'pending',
-      reason: 'waiting for the channel to agree',
+      reason: expect.stringMatching(/^waiting for the channel to agree\. Run this there: \/vercel board sync accept syn_\w+$/),
     })
     const other = await team.createSync({ channel: 'support', source: 'slack', slack: { channel: '#support' } })
     // What Slack does next is its to say: one channel agrees, and the app is removed from the other.

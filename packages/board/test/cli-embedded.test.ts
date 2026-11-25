@@ -332,7 +332,7 @@ describe('the embedded CLI', () => {
       const app = createApp({ appName: 'vercel board' })
       const run = (...argv: string[]) => capture(() => app.run([...argv, '--scope', 'acme']))
       const asked = await run('sync', 'alerts', 'slack/vercel:#alerts', '--workspace', 'acme-corp')
-      const [, id] = /^(syn_\w+)  alerts  slack\/vercel:#alerts  pending: waiting for the channel to agree\n$/.exec(asked.stdout) ?? []
+      const [, id] = /^(syn_\w+)  alerts  slack\/vercel:#alerts  pending: waiting for the channel to agree\. Run this there: \/vercel board sync accept \1\n$/.exec(asked.stdout) ?? []
       expect([asked.code, asked.stderr, typeof id]).toEqual([0, '', 'string'])
       expect(api.managedSyncs.get(id!)?.slack?.workspaceId).toBe('acme-corp')
       expect(JSON.parse((await run('sync', 'alerts', 'slack/vercel:#alerts', '--json')).stdout)).toMatchObject({ outcome: 'pending', sync: { state: 'pending' } })
@@ -364,10 +364,10 @@ describe('the embedded CLI', () => {
       const app = createApp({ appName: 'vercel board' })
       const run = (...argv: string[]) => capture(() => app.run([...argv, '--scope', 'acme']))
       const made = await run('sync', 'alerts', 'slack/vercel:#alerts')
-      const [, id] = /^(syn_\w+)  alerts  slack\/vercel:#alerts  pending: waiting for the channel to agree\n$/.exec(made.stdout) ?? []
+      const [, id] = /^(syn_\w+)  alerts  slack\/vercel:#alerts  pending: waiting for the channel to agree\. Run this there: \/vercel board sync accept \1\n$/.exec(made.stdout) ?? []
       expect([made.code, made.stderr, typeof id]).toEqual([0, '', 'string'])
       expect((await run('sync', 'ops/alerts', 'slack/vercel:#ops-alerts')).code).toBe(0)
-      const row = `${id}  alerts  slack/vercel:#alerts  pending: waiting for the channel to agree\n`
+      const row = `${id}  alerts  slack/vercel:#alerts  pending: waiting for the channel to agree. Run this there: /vercel board sync accept ${id}\n`
       // A channel's own, by naming it either way, and the whole board's.
       expect((await run('sync', 'alerts')).stdout).toBe(row)
       expect((await run('syncs', 'alerts')).stdout).toBe(row)
