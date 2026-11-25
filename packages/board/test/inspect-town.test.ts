@@ -280,3 +280,25 @@ describe('names over a table', () => {
     expect(fitted(['vulns-agent-with-a-long-name', 'fx'])).toBe('vulns-agent-with-a-long-name +1')
   })
 })
+
+describe('threads you have not seen', () => {
+  const at = (ms: number) => ago(ms)
+  it('marks a thread someone else wrote in after you last saw it, and counts them on its house', () => {
+    const state = stateOf(['dev'], [...discussion(1, ADA, 'dev', { createdAt: at(60_000) }), ...discussion(2, FX, 'dev', { createdAt: at(30_000) })])
+    // You saw thread 1 after its last word, and thread 2 before it.
+    const town = townOf(state, NOW, { here: 'dev', seen: { '1': at(1000), '2': at(40_000) } })
+    const tables = Object.fromEntries(town.houses[0]!.tables.map((t) => [t.thread, t.unseen]))
+    expect(tables).toEqual({ '1': null, '2': 'new' })
+    expect(town.houses[0]!.unseen).toEqual({ threads: 1, mentioned: false })
+  })
+
+  it('marks a mention of you over a plain new reply, and never what you wrote yourself', () => {
+    const mention = message(5, ADA, 'dev', { re: '1', text: `over to @[${ME}]`, createdAt: at(10_000) })
+    const mine = message(6, ME, 'dev', { re: '2', createdAt: at(10_000) })
+    const state = stateOf(['dev'], [...discussion(1, ADA, 'dev', { createdAt: at(60_000) }), ...discussion(2, ADA, 'dev', { createdAt: at(60_000) }), mention, mine])
+    const town = townOf(state, NOW, { seen: { '1': at(50_000), '2': at(50_000) } })
+    const tables = Object.fromEntries(town.houses[0]!.tables.map((t) => [t.thread, t.unseen]))
+    expect(tables).toEqual({ '1': 'mention', '2': null })
+    expect(town.houses[0]!.unseen).toEqual({ threads: 1, mentioned: true })
+  })
+})

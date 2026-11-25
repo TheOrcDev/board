@@ -19,7 +19,7 @@ export const GONE_MS = 24 * 60 * 60_000
 export const WALL = 10
 const FRONT = 96
 /** One table's share of a floor: the table, its chairs, and room to walk between. */
-export const CELL = { width: 170, depth: 132 }
+export const CELL = { width: 170, depth: 176 }
 /** Room between two houses on a street, and between a row of houses and the street in front of it. */
 const GAP = { x: 70, y: 96 }
 /** Where a house's sign hangs, under its front wall. */
@@ -28,7 +28,7 @@ export const PLATE = 44
  * A city block: its houses stand on it in rows, each row's fronts on one line, facing the road in front. Two
  * rows of standard houses fit on one, or a hall of sixteen tables with room to walk around it.
  */
-export const BLOCK = { width: 1000, depth: 1000 }
+export const BLOCK = { width: 1000, depth: 1200 }
 /** The roads between blocks. */
 export const ROAD = 110
 /** Between a block's edge and its houses. */
@@ -68,6 +68,8 @@ export type Table = {
   task: TaskView['state'] | null
   /** How many sit at it. */
   seated: number
+  /** Whether you haven't seen what it last heard: someone mentioned you in it since, or wrote in it. */
+  unseen: Unseen
   /** Its chairs: three on its far side, then three on its near side. */
   chairs: Spot[]
 }
@@ -90,9 +92,20 @@ export type House = {
   tables: Table[]
   /** Who's in it, the most recent first: what its roof says while it's on. */
   who: { name: string; agent: boolean; idle: boolean; avatar: string | null }[]
+  /** How many of its threads you haven't seen, and whether one of them mentions you. */
+  unseen: { threads: number; mentioned: boolean }
 }
 
 /** A district: the houses of one path prefix, on blocks of their own; its sign stands at its first block's corner. */
+/**
+ * A thread you haven't seen: someone else wrote in it after you last looked (`new`), and mentioned you there
+ * (`mention`). Null for one you have, or that only you wrote in since.
+ */
+export type Unseen = 'mention' | 'new' | null
+
+/** When you last saw each thread, by its root's ID: kept by the page, in this browser. */
+export type Seen = Record<string, string>
+
 export type Street = { name: string; x: number; y: number }
 
 /** A block of the city, with the district it belongs to. */
@@ -158,7 +171,7 @@ export const streetOf = (path: string) => (path.includes('/') ? path.slice(0, pa
  * So the same board is the same city every time, and a new channel moves only the houses after it in its
  * district. `here` is the house you've walked into, where you stand.
  */
-export function townOf(state: State, now: number, options: { here?: string | null; looking?: string | null } = {}): Town {
+export function townOf(state: State, now: number, options: { here?: string | null; looking?: string | null; seen?: Seen } = {}): Town {
   const channels = Object.keys(state.channels)
   // A channel the stream showed before the list did is a house all the same.
   for (const message of Object.values(state.messages)) if (!channels.includes(message.channel)) channels.push(message.channel)
@@ -167,7 +180,7 @@ export function townOf(state: State, now: number, options: { here?: string | nul
   const names = [...byStreet.keys()].sort((a, b) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)))
 
   const messages = Object.values(state.messages).filter((message) => !message.deleted)
-  const threads = threadsBy(state, messages, now)
+  const threads = threadsBy(state, messages, now, options.seen ?? {})
   const open = new Map<string, number>()
   for (const message of messages)
     if (isTask(message) && ['ready', 'claimed', 'waiting', 'blocked'].includes(stateNow(message.task, now))) open.set(message.channel, (open.get(message.channel) ?? 0) + 1)
@@ -256,8 +269,10 @@ export function townOf(state: State, now: number, options: { here?: string | nul
         threads: count,
         busy: messages.some((m) => m.channel === channel && now - Date.parse(m.createdAt) < BUBBLE_MS),
         tasks: open.get(channel) ?? 0,
-        tables: ranked.map((t) => ({ thread: t.thread, label: t.label, task: t.task, x: 0, y: 0, seated: 0, chairs: [] })),
+        tables: ranked.map((t) => ({ thread: t.thread, label: t.label, task: t.task, x: 0, y: 0, seated: 0, chairs: [], unseen: t.unseen })),
         who: [],
+        // Every thread you haven't seen counts, not only those at a table.
+        unseen: { threads: known.filter((t) => t.unseen !== null).length, mentioned: known.some((t) => t.unseen === 'mention') },
       })
       x += size.width + GAP.x
     }
@@ -344,20 +359,30 @@ function seatAt(table: Table, seat: number): Spot {
   }
 }
 
-type Busiest = { thread: string; at: string; label: string; task: TaskView['state'] | null }
+type Busiest = { thread: string; at: string; label: string; task: TaskView['state'] | null; unseen: Unseen }
 
 /**
  * Each channel's threads, the latest active first: when each last heard anything, and what its root says. A
  * thread is a root with replies, or a task: a message no one has answered is only a message, and gets no table.
  */
-function threadsBy(state: State, messages: MessageView[], now: number): Map<string, Busiest[]> {
+function threadsBy(state: State, messages: MessageView[], now: number, seen: Seen): Map<string, Busiest[]> {
   const latest = new Map<string, Busiest & { channel: string }>()
   const answered = new Set<string>()
   for (const message of messages) {
     const thread = message.re ?? message.id
     if (message.re !== null) answered.add(message.re)
     const known = latest.get(thread)
-    if (!known || message.createdAt > known.at) latest.set(thread, { thread, channel: message.channel, at: message.createdAt, label: '', task: null })
+    if (!known || message.createdAt > known.at) latest.set(thread, { thread, channel: message.channel, at: message.createdAt, label: '', task: null, unseen: null })
+  }
+  // What you haven't seen: by someone else, after you last looked at its thread.
+  const me = state.me?.actor
+  const unseen = new Map<string, Unseen>()
+  for (const message of messages) {
+    const thread = message.re ?? message.id
+    if (message.by.actor === me || message.createdAt <= (Object.hasOwn(seen, thread) ? seen[thread]! : '')) continue
+    const mentions = me !== undefined && message.text.includes(`@[${me}]`)
+    if (mentions) unseen.set(thread, 'mention')
+    else if (!unseen.has(thread)) unseen.set(thread, 'new')
   }
   // A channel's listing knows replies the page hasn't loaded.
   for (const [channel, listing] of Object.entries(state.listings))
@@ -367,7 +392,7 @@ function threadsBy(state: State, messages: MessageView[], now: number): Map<stri
     const root = state.messages[t.thread]
     const view = root && !root.deleted ? shown(state, t.thread) : undefined
     if (!answered.has(t.thread) && !view?.task) continue
-    const entry = { thread: t.thread, at: t.at, label: view ? firstLine(view.text, state) : '', task: view?.task ? stateNow(view.task, now) : null }
+    const entry = { thread: t.thread, at: t.at, label: view ? firstLine(view.text, state) : '', task: view?.task ? stateNow(view.task, now) : null, unseen: unseen.get(t.thread) ?? null }
     out.set(t.channel, [...(out.get(t.channel) ?? []), entry])
   }
   for (const list of out.values()) list.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))

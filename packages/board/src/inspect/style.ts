@@ -734,6 +734,29 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
 .town .roof-pill { padding: 3px 10px 3px 8px; font-size: 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .town .roof-pill:hover { background: rgba(24, 26, 32, 1); }
 .bubble .who { display: block; color: var(--muted); font-size: 10px; }
+/* A quest marker: something you haven't seen, bobbing where it is. A mention is red. */
+.town .quest {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  justify-content: center;
+  border-radius: 999px;
+  background: #ffd23f;
+  color: #231a00;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px rgba(35, 26, 0, 0.85), 0 3px 8px rgba(0, 0, 0, 0.3);
+  animation: quest 1.4s ease-in-out infinite;
+}
+.town .quest b { font-size: 15px; line-height: 1; }
+.town .quest.mention { background: #ff5a4f; color: #fff; box-shadow: 0 0 0 2px rgba(60, 8, 4, 0.85), 0 3px 8px rgba(0, 0, 0, 0.3); }
+/* In a table's pill: small, and still, so the pill reads. */
+.town .quest.inline { min-width: 16px; height: 16px; padding: 0 4px; margin: 0 1px 0 -2px; font-size: 11px; animation: none; box-shadow: none; }
+@keyframes quest { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@media (prefers-reduced-motion: reduce) { .town .quest { animation: none; } }
 .bubble {
   position: relative;
   width: max-content;

@@ -4,7 +4,7 @@ import { Vector3 } from 'three'
 import { here as hereWith, navigate, useNow } from './nav.tsx'
 import { type State } from './store.ts'
 import { World, type Label, type Picked } from './scene.ts'
-import { fitted, PLATE, townOf, type House, type Resident } from './town.ts'
+import { fitted, PLATE, townOf, type House, type Resident, type Seen } from './town.ts'
 import { Header } from './ui.tsx'
 
 /**
@@ -43,7 +43,8 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
     }
   }, [])
 
-  const town = useMemo(() => townOf(state, now, { here: house, looking: thread }), [state.messages, state.channels, state.actors, state.ops, state.me, now, house, thread])
+  const seen = useSeenThreads(state, thread)
+  const town = useMemo(() => townOf(state, now, { here: house, looking: thread, seen }), [state.messages, state.channels, state.actors, state.ops, state.me, now, house, thread, seen])
   const lit = useMemo(() => new Set(town.residents.filter((r) => !r.idle).map((r) => r.channel)), [town])
   useEffect(() => world.current?.show(town, house, lit), [town, house, lit])
 
@@ -85,6 +86,32 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
               </button>
             </div>
           ))}
+          {/* A house with threads you haven't seen, from across the city: a marker over its roof, and how many. */}
+          {town.houses
+            .filter((h) => h.channel !== house && h.unseen.threads > 0)
+            .map((h) => (
+              <div key={`quest:${h.channel}`} className="over" ref={over(`quest:${h.channel}`, () => new Vector3(h.x + h.width / 2, 340, h.y + h.depth / 2), 5)}>
+                <div className="stack">
+                <button className={`quest${h.unseen.mentioned ? ' mention' : ''}`} onClick={() => enter(h.channel)} title={`${h.unseen.threads} thread${h.unseen.threads === 1 ? '' : 's'} you haven't seen in #${h.channel}${h.unseen.mentioned ? ', one mentioning you' : ''}`}>
+                  <b>{h.unseen.mentioned ? '@' : '!'}</b>
+                  {h.unseen.threads > 1 && <span>{h.unseen.threads}</span>}
+                </button>
+                </div>
+              </div>
+            ))}
+          {/* Inside, over each table whose thread you haven't seen. */}
+          {/* At an empty table on its own, just over it; at one with people, in their pill. */}
+          {open?.tables
+            .filter((table) => table.unseen !== null && table.seated === 0)
+            .map((table) => (
+              <div key={`quest:${table.thread}`} className="over" ref={over(`quest:${table.thread}`, () => new Vector3(table.x + 70, 60, table.y + 17), 5)}>
+                <div className="stack">
+                <button className={`quest${table.unseen === 'mention' ? ' mention' : ''}`} onClick={() => navigate(hereWith({ thread: table.thread }))} title={table.unseen === 'mention' ? 'you were mentioned here since you last looked' : "new since you last looked"}>
+                  <b>{table.unseen === 'mention' ? '@' : '!'}</b>
+                </button>
+                </div>
+              </div>
+            ))}
           {/* Who's in a house with its roof on, over its roof, as a room's names show over it. */}
           {town.houses
             .filter((h) => h.channel !== house && h.who.length > 0)
@@ -129,6 +156,11 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
                     </button>
                   )}
                   <span className="roof-pill" title={seated.map((r) => r.name).join(', ')}>
+                    {table.unseen && (
+                      <b className={`quest inline${table.unseen === 'mention' ? ' mention' : ''}`} title={table.unseen === 'mention' ? 'you were mentioned here since you last looked' : 'new since you last looked'}>
+                        {table.unseen === 'mention' ? '@' : '!'}
+                      </b>
+                    )}
                     <i className={seated.some((r) => !r.idle) ? 'on' : ''} />
                     <Faces urls={seated.map((r) => r.avatar)} />
                     {!seated.some((r) => r.avatar) && seated.some((r) => r.agent) && <Bot size={11} strokeWidth={2} />}
@@ -148,6 +180,45 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
       {house && <section className="town-inside">{props.children}</section>}
     </>
   )
+}
+
+/**
+ * When you last saw each thread, kept in this browser, as the sidebar keeps its unread dots: what's open is
+ * seen, up to its newest message, as it comes in. The first visit sees everything there is, so the city doesn't
+ * open covered in markers; after that, a marker means news.
+ */
+function useSeenThreads(state: State, open: string | null): Seen {
+  const key = `board.town.seen:${state.discovery?.url ?? location.host}`
+  const [seen, setSeen] = useState<Seen | null>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(key) ?? 'null')
+    } catch {
+      return null
+    }
+  })
+  const save = (next: Seen) => {
+    setSeen(next)
+    try {
+      localStorage.setItem(key, JSON.stringify(next))
+    } catch {}
+  }
+  const newest = (thread: string) =>
+    Object.values(state.messages).reduce((at, m) => ((m.re ?? m.id) === thread && m.createdAt > at ? m.createdAt : at), '')
+  useEffect(() => {
+    if (seen !== null || state.cursor === null) return
+    const first: Seen = {}
+    for (const m of Object.values(state.messages)) {
+      const thread = m.re ?? m.id
+      if (!first[thread] || m.createdAt > first[thread]!) first[thread] = m.createdAt
+    }
+    save(first)
+  }, [state.cursor, seen === null])
+  useEffect(() => {
+    if (!open || seen === null) return
+    const at = newest(open)
+    if (at && (!Object.hasOwn(seen, open) || seen[open]! < at)) save({ ...seen, [open]: at })
+  }, [open, state.messages, seen])
+  return seen ?? {}
 }
 
 /** Up to three people's pictures, overlapping a little, as a pill's faces; none for who has no picture. */

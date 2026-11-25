@@ -35,6 +35,11 @@ function rules(css: string): Rule[] {
         read(head.slice('@media'.length).trim())
         continue
       }
+      // An animation's frames are blocks inside a block, and set no field's font.
+      if (head.startsWith('@keyframes')) {
+        read(head)
+        continue
+      }
       const end = text.indexOf('}', i)
       const body = text.slice(i, end)
       i = end + 1
