@@ -18,6 +18,8 @@ export const GONE_MS = 24 * 60 * 60_000
 /** A house's walls, and the room in front of them for its sign. */
 export const WALL = 10
 const FRONT = 96
+/** The strip along a house's back wall where its whiteboard stands, behind the back row of chairs. */
+export const BOARD = 40
 /** One table's share of a floor: the table, its chairs, and room to walk between. */
 export const CELL = { width: 170, depth: 176 }
 /** Room between two houses on a street, and between a row of houses and the street in front of it. */
@@ -28,11 +30,15 @@ export const PLATE = 44
  * A city block: its houses stand on it in rows, each row's fronts on one line, facing the road in front. Two
  * rows of standard houses fit on one, or a hall of sixteen tables with room to walk around it.
  */
-export const BLOCK = { width: 1000, depth: 1200 }
+export const BLOCK = { width: 1000, depth: 0 }
 /** The roads between blocks. */
 export const ROAD = 110
 /** Between a block's edge and its houses. */
 const INSET = 34
+/** A standard house's depth: two rows of two tables, its board, its walls, and the room inside its door. */
+const STANDARD = 2 * WALL + BOARD + 2 * CELL.depth + FRONT
+// Deep enough for two rows of standard houses with their signs, the room in front of each, and its insets.
+BLOCK.depth = 2 * INSET + 2 * (STANDARD + PLATE + GAP.y / 2)
 /** The path between the two halves of a block that two small districts share. */
 const PATH = 20
 /** Half a block's depth: a small district's, whose houses fit in one row. */
@@ -54,7 +60,7 @@ const FIGURE = 46
  */
 export function sizeOf(threads: number): { columns: number; rows: number; width: number; depth: number } {
   const [columns, rows] = threads === 0 ? [1, 1] : threads <= 2 ? [2, 1] : threads <= 4 ? [2, 2] : threads <= 6 ? [3, 2] : threads <= 9 ? [3, 3] : threads <= 12 ? [4, 3] : [4, 4]
-  return { columns, rows, width: 2 * WALL + columns * CELL.width, depth: 2 * WALL + rows * CELL.depth + FRONT }
+  return { columns, rows, width: 2 * WALL + columns * CELL.width, depth: 2 * WALL + BOARD + rows * CELL.depth + FRONT }
 }
 
 export type Table = {
@@ -346,7 +352,7 @@ function tableAt(house: House, columns: number, n: number): Spot {
   return {
     x: house.x + WALL + (n % columns) * CELL.width + (CELL.width - TABLE.width) / 2,
     // Its far side's chairs between it and the wall, or the row of tables behind it.
-    y: house.y + WALL + Math.floor(n / columns) * CELL.depth + FIGURE + 4,
+    y: house.y + WALL + BOARD + Math.floor(n / columns) * CELL.depth + FIGURE + 4,
   }
 }
 
@@ -452,6 +458,15 @@ export function fitted(names: string[], room = 16): string {
   }
   const more = names.length - shown.length
   return `${shown.join(', ')}${more > 0 ? ` +${more}` : ''}`
+}
+
+/**
+ * Where a house's whiteboard stands, from the house's corner: as wide as fits along its back wall, and high
+ * enough that it shows over the heads at the back row's tables.
+ */
+export function boardOf(house: Pick<House, 'width'>): { width: number; height: number; bottom: number; z: number } {
+  const width = Math.min(house.width - 90, 420)
+  return { width, height: Math.min(140, 80 + width * 0.15), bottom: 132, z: WALL + 6 }
 }
 
 /** A house's roof color, the same for a channel every time: one of a few, by its name. */

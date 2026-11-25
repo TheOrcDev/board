@@ -2,10 +2,11 @@ import { Bot, Hammer, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Vector3 } from 'three'
 import { here as hereWith, navigate, useNow } from './nav.tsx'
-import { type State } from './store.ts'
-import { World, type Label, type Picked } from './scene.ts'
-import { fitted, PLATE, townOf, type House, type Resident, type Seen } from './town.ts'
+import { isTask, stateNow, type State } from './store.ts'
+import { LAYERS, World, type Label, type Picked } from './scene.ts'
+import { boardOf, firstLine, fitted, PLATE, townOf, type House, type Resident, type Seen } from './town.ts'
 import { Header } from './ui.tsx'
+import { ago } from './words.ts'
 
 /**
  * Boardville: the board as a village in three dimensions. Each channel is a house on its street, and
@@ -100,6 +101,10 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
               </div>
             ))}
           {/* Inside, over each table whose thread you haven't seen. */}
+          {open && <Whiteboard house={open} state={state} now={now} attach={over(`board:${open.channel}`, () => {
+            const board = boardOf(open)
+            return new Vector3(open.x + open.width / 2, LAYERS.floor + board.bottom + board.height / 2, open.y + board.z + 3)
+          }, 2)} />}
           {/* At an empty table on its own, just over it; at one with people, in their pill. */}
           {open?.tables
             .filter((table) => table.unseen !== null && table.seated === 0)
@@ -179,6 +184,50 @@ export function Town(props: { state: State; lead: ReactNode; house: string | nul
       </div>
       {house && <section className="town-inside">{props.children}</section>}
     </>
+  )
+}
+
+/**
+ * What a room's whiteboard says of its channel: its tasks by where they stand, and its latest threads,
+ * each a line that opens it. From what the page has loaded: the board keeps no summary of its own.
+ */
+function Whiteboard({ house, state, now, attach }: { house: House; state: State; now: number; attach: (element: HTMLElement | null) => void }) {
+  const messages = Object.values(state.messages).filter((m) => m.channel === house.channel && !m.deleted)
+  const tally = { ready: 0, claimed: 0, waiting: 0, done: 0 }
+  for (const m of messages) {
+    if (!isTask(m)) continue
+    const standing = stateNow(m.task, now)
+    if (standing === 'ready') tally.ready++
+    else if (standing === 'claimed') tally.claimed++
+    else if (standing === 'waiting' || standing === 'blocked') tally.waiting++
+    else if (standing === 'completed') tally.done++
+  }
+  const latest = new Map<string, string>()
+  for (const m of messages) {
+    const thread = m.re ?? m.id
+    if ((latest.get(thread) ?? '') < m.createdAt) latest.set(thread, m.createdAt)
+  }
+  const threads = [...latest].sort((a, b) => (a[1] < b[1] ? 1 : -1)).slice(0, 3)
+  const tasks = tally.ready + tally.claimed + tally.waiting + tally.done
+  return (
+    <div className="over centered" data-span={boardOf(house).width - 14} ref={attach}>
+      <div className="whiteboard">
+        <h3>#{house.name}</h3>
+        {tasks > 0 && (
+          <div className="tally">
+            {tally.ready > 0 && <span>{tally.ready} ready</span>}
+            {tally.claimed > 0 && <span>{tally.claimed} in progress</span>}
+            {tally.waiting > 0 && <span><b>{tally.waiting} blocked</b></span>}
+            {tally.done > 0 && <span>{tally.done} done</span>}
+          </div>
+        )}
+        {threads.map(([thread, at]) => (
+          <button key={thread} onClick={() => navigate(hereWith({ thread }))} title="open the thread">
+            · {firstLine(state.messages[thread]?.text ?? '', state) || 'a thread'} <span className="ago">{ago(at, now)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 

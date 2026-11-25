@@ -626,18 +626,26 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
 
 /* --- boardville: the board as a village in 3D, its text as page elements over the scene --- */
 .town {
-  --sky: #e6eef3;
-  --ground: #dfe8d4;
-  --street: #cfd4c4;
-  --walls: #fbfaf6;
-  --ink: #4a4a4a;
-  --window: #dfe6ec;
-  --lit: #f3d27a;
-  --smoke: #d0d0d0;
-  --floor: #e2cfae;
-  --table: #a77b52;
-  --chair: #5a6270;
-  --roof-0: #b8604f; --roof-1: #5b7fa6; --roof-2: #6f9363; --roof-3: #c39a4a; --roof-4: #8a72a8; --roof-5: #4f8f8a;
+  /* A cozy, toy-like village: soft pastels, warm wood, bright grass. */
+  --sky: #bfe6fb;
+  --ground: #8fd07a;
+  --street: #efdcae;
+  --walls: #fff6e6;
+  --ink: #6b5a48;
+  --window: #d8ecf7;
+  --lit: #ffd96b;
+  --smoke: #f4f1ea;
+  --floor: #ecc996;
+  --table: #c98a55;
+  --chair: #8cc7c0;
+  --leaves: #5fbf5c;
+  --pine: #3f9e66;
+  --trunk: #a8754f;
+  --flower-0: #ff8fa3; --flower-1: #ffd166; --flower-2: #ffffff; --flower-3: #b39cff;
+  --rug: #f6c2b0;
+  --mat: #e7a46a;
+  --pot: #e08f62;
+  --roof-0: #f28b78; --roof-1: #7db6ea; --roof-2: #7ccf9e; --roof-3: #f4c95d; --roof-4: #b99af0; --roof-5: #f6a45f;
   position: relative;
   flex: 1;
   min-height: 0;
@@ -646,17 +654,24 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
 }
 @media (prefers-color-scheme: dark) {
   .town {
-    --sky: #0e1216;
-    --ground: #1a2219;
-    --street: #3a4239;
-    --walls: #3a3b36;
-    --ink: #8d8d8d;
-    --window: #2c3238;
-    --lit: #e3b955;
-    --smoke: #6a6a6a;
-    --floor: #4a3e2f;
-    --table: #7a5a3c;
-    --chair: #3c424c;
+    /* The same village at dusk. */
+    --sky: #1d2a45;
+    --ground: #3c6b47;
+    --street: #8c7d62;
+    --walls: #d9cfc0;
+    --ink: #b8a890;
+    --window: #3a4a60;
+    --lit: #ffcf5a;
+    --smoke: #8a8a8a;
+    --floor: #a8855c;
+    --table: #8a5f3b;
+    --chair: #5f8f8a;
+    --leaves: #3f8a4a;
+    --pine: #2f7350;
+    --trunk: #7a5538;
+    --rug: #a8746a;
+    --mat: #a8744a;
+    --pot: #a8664a;
   }
 }
 /* A house you're in: the scene keeps the top of the page, its channel the rest. */
@@ -687,7 +702,15 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
 }
 .town .plate .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .town .plate:hover, .town .plate.open { border-color: var(--bright); }
-.town .street-sign { display: block; padding: 2px 10px; background: var(--bright); color: var(--bg); font-size: 12px; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; }
+.town .street-sign { display: block; padding: 3px 12px; border-radius: 6px; background: #6b4f3a; color: #fff6e6; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; box-shadow: 0 2px 0 #4a3626; }
+/* What a room's whiteboard says: in marker, on the board the scene draws, as wide as it. */
+.town .whiteboard { display: grid; gap: 2px; width: var(--fit, 300px); padding: 4px 10px; color: #26457a; font-size: 10px; line-height: 1.25; pointer-events: auto; }
+.town .whiteboard h3 { margin: 0; font-size: 12px; color: #1f2f52; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.town .whiteboard .tally { display: flex; flex-wrap: wrap; gap: 4px 10px; color: #2f6b3f; }
+.town .whiteboard .tally b { color: #b8452f; }
+.town .whiteboard button { display: block; width: 100%; padding: 0; text-align: left; color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.town .whiteboard button:hover { text-decoration: underline; }
+.town .whiteboard .ago { color: #7a8aa8; }
 .town .plate.open .name { text-decoration: underline; text-underline-offset: 3px; }
 .town .plate .count { padding: 0 5px; background: var(--bright); color: var(--bg); font-size: 10px; line-height: 16px; }
 .town .table-label button {

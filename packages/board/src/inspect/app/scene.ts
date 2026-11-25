@@ -4,6 +4,7 @@ import {
   BufferGeometry,
   CapsuleGeometry,
   Color,
+  ConeGeometry,
   CylinderGeometry,
   DirectionalLight,
   DoubleSide,
@@ -11,6 +12,8 @@ import {
   Fog,
   Group,
   HemisphereLight,
+  InstancedMesh,
+  Matrix4,
   Mesh,
   MeshStandardMaterial,
   PCFSoftShadowMap,
@@ -26,7 +29,8 @@ import {
   type Material,
   type Object3D,
 } from 'three'
-import { BLOCK, ROAD, ROOFS, roofOf, WALL as WALL_THICK, type House, type Resident, type Town } from './town.ts'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
+import { BLOCK, boardOf, PLATE, ROAD, ROOFS, roofOf, WALL as WALL_THICK, type House, type Resident, type Town } from './town.ts'
 
 // Boardville in three dimensions. The village's layout is town.ts's, in its pixels: x across, y down
 // the page, which is z here, with y up. This only draws it: houses with roofs that lift off the one
@@ -55,8 +59,8 @@ export function clip(distance: number): { near: number; far: number } {
 export const SUN = new Vector3(-900, 1600, 900)
 /** The sun's shadow map: its texels, and how far it reaches each way from what's in view. */
 const SHADOW = { size: 2048, span: 2200 }
-const TILT = (50 * Math.PI) / 180
-const FOV = 32
+/** The camera over the village, and inside a house: lower and narrower there, for a room seen like a diorama. */
+const VIEW = { village: { tilt: (48 * Math.PI) / 180, fov: 30 }, house: { tilt: (34 * Math.PI) / 180, fov: 22 } }
 /** How fast people walk, in the layout's pixels a second. */
 const PACE = 300
 /** People, to the scale of the houses. */
@@ -66,7 +70,7 @@ const FAR_BLOCKS = 2.2
 /** Farther than this, only the signs of houses with people or tasks show: the rest are too many to read. */
 const QUIET_SIGNS = 4500
 
-type Palette = { sky: string; ground: string; street: string; walls: string; floor: string; table: string; chair: string; ink: string; lit: string; window: string; smoke: string; bright: string; roofs: string[] }
+type Palette = { sky: string; ground: string; street: string; walls: string; floor: string; table: string; chair: string; ink: string; lit: string; window: string; smoke: string; bright: string; roofs: string[]; leaves: string; pine: string; trunk: string; flowers: string[]; rug: string; mat: string; pot: string }
 
 /** The village's colors, from the page's own tokens, so it follows light and dark. */
 export function paletteOf(element: Element): Palette {
@@ -86,6 +90,13 @@ export function paletteOf(element: Element): Palette {
     smoke: token('--smoke', '#b8b8b8'),
     bright: token('--bright', '#040404'),
     roofs: Array.from({ length: ROOFS }, (_, i) => token(`--roof-${i}`, '#b8604f')),
+    leaves: token('--leaves', '#6cc46a'),
+    pine: token('--pine', '#4fa86a'),
+    trunk: token('--trunk', '#a8754f'),
+    flowers: ['--flower-0', '--flower-1', '--flower-2', '--flower-3'].map((name, i) => token(name, ['#ff8fa3', '#ffd166', '#ffffff', '#b39cff'][i]!)),
+    rug: token('--rug', '#f2b8a2'),
+    mat: token('--mat', '#e7a46a'),
+    pot: token('--pot', '#d98b5f'),
   }
 }
 
@@ -102,6 +113,11 @@ type HouseThings = {
   lift: number
   open: boolean
   busy: boolean
+  /** How high its roof rises over its walls. */
+  rise: number
+  /** Whether it stands between the camera and the house you're in, and how faded it is for that. */
+  inFront: boolean
+  ghost: number
 }
 
 type PersonThings = {
@@ -139,9 +155,13 @@ export type Picked = { house: string } | { thread: string } | null
 export class World {
   private renderer: WebGLRenderer
   private scene = new Scene()
-  private camera = new PerspectiveCamera(FOV, 1, 10, 30_000)
+  private camera = new PerspectiveCamera(VIEW.village.fov, 1, 10, 30_000)
+  private tilt = VIEW.village.tilt
+  private view = VIEW.village
   private ground: Mesh
   private streets = new Group()
+  /** The layout the city was last built for. */
+  private cityKey = ''
   private houses = new Map<string, HouseThings>()
   private people = new Map<string, PersonThings>()
   private palette: Palette
@@ -184,9 +204,9 @@ export class World {
 
     this.scene.background = new Color(this.palette.sky)
     this.scene.fog = new Fog(this.palette.sky, 2000, 6000)
-    this.scene.add(new HemisphereLight(0xffffff, 0x9a9a8a, 1.3))
-    this.scene.add(new AmbientLight(0xffffff, 0.35))
-    const sun = new DirectionalLight(0xffffff, 1.7)
+    this.scene.add(new HemisphereLight(0xdff2ff, 0x9cc77c, 1.25))
+    this.scene.add(new AmbientLight(0xfff4e6, 0.4))
+    const sun = new DirectionalLight(0xfff0d6, 2.1)
     sun.castShadow = true
     sun.shadow.mapSize.set(SHADOW.size, SHADOW.size)
     Object.assign(sun.shadow.camera, { left: -SHADOW.span, right: SHADOW.span, top: SHADOW.span, bottom: -SHADOW.span, near: 10, far: 6000 })
@@ -277,6 +297,12 @@ export class World {
         dispose(things.group)
         this.houses.delete(channel)
       }
+    // In front of the house you're in: nearer the camera, which looks from the street side, and across from it.
+    const inside = open ? town.houses.find((h) => h.channel === open) : undefined
+    for (const house of town.houses) {
+      const things = this.houses.get(house.channel)!
+      things.inFront = !!inside && house !== inside && house.y > inside.y + inside.depth - 40 && house.x < inside.x + inside.width + 160 && house.x + house.width > inside.x - 160
+    }
 
     const here = new Set<string>()
     for (const resident of town.residents) {
@@ -348,19 +374,23 @@ export class World {
 
   // --- the camera ---------------------------------------------------------------------------
 
-  private fit(width: number, depth: number) {
+  /** How far back the camera stands to see `width` across, and `depth` of ground with things `tall` standing on it. */
+  private fit(width: number, depth: number, tall = 0) {
     const aspect = this.camera.aspect || 1
-    // The ground's depth shows foreshortened by the camera's tilt.
-    return (1.05 * Math.max(width / aspect, depth * Math.sin(TILT) + 120)) / (2 * Math.tan((FOV * Math.PI) / 360))
+    // The ground's depth shows foreshortened by the camera's tilt, and what stands on it shows its height.
+    const { tilt, fov } = this.view
+    return (1.05 * Math.max(width / aspect, depth * Math.sin(tilt) + tall * Math.cos(tilt) + 120)) / (2 * Math.tan((fov * Math.PI) / 360))
   }
 
   private aim(town: Town, open: string | null) {
     const house = open ? town.houses.find((h) => h.channel === open) : undefined
     this.aimedAt = house ? `${house.x},${house.y},${house.width},${house.depth}` : ''
+    this.view = house ? VIEW.house : VIEW.village
     if (house) {
-      this.lookGoal.set(house.x + house.width / 2, 0, house.y + house.depth / 2 + 30)
+      // A little above the floor: the room, and its whiteboard and the pills over it, all in view.
+      this.lookGoal.set(house.x + house.width / 2, 70, house.y + house.depth / 2 + 10)
       // With room around it for the pills over the back row and the sign under its door.
-      this.distanceGoal = this.fit(house.width + 80, house.depth + 200)
+      this.distanceGoal = this.fit(house.width + 80, house.depth + 120, 240)
     } else {
       const whole = this.fit(town.width + 80, town.height + 120)
       const near = this.fit(FAR_BLOCKS * BLOCK.width, FAR_BLOCKS * BLOCK.depth)
@@ -399,7 +429,13 @@ export class World {
     const ease = this.still ? 1 : 1 - Math.exp(-dt * 4)
     this.look.lerp(this.lookGoal, ease)
     this.distance += (this.distanceGoal - this.distance) * ease
-    this.camera.position.set(this.look.x, this.look.y + Math.sin(TILT) * this.distance, this.look.z + Math.cos(TILT) * this.distance)
+    this.tilt += (this.view.tilt - this.tilt) * ease
+    const fov = this.camera.fov + (this.view.fov - this.camera.fov) * ease
+    if (Math.abs(fov - this.camera.fov) > 1e-4) {
+      this.camera.fov = fov
+      this.camera.updateProjectionMatrix()
+    }
+    this.camera.position.set(this.look.x, this.look.y + Math.sin(this.tilt) * this.distance, this.look.z + Math.cos(this.tilt) * this.distance)
     this.camera.lookAt(this.look)
     const planes = clip(this.distance)
     if (this.camera.near !== planes.near || this.camera.far !== planes.far) {
@@ -415,17 +451,21 @@ export class World {
     for (const house of this.houses.values()) {
       const target = house.open ? 1 : 0
       house.lift += (target - house.lift) * (this.still ? 1 : 1 - Math.exp(-dt * 5))
+      // A house between the camera and the one you're in fades to a ghost of itself, so nothing hides the room.
+      house.ghost += ((house.inFront ? 0.78 : 0) - house.ghost) * (this.still ? 1 : 1 - Math.exp(-dt * 5))
       house.roof.position.y = house.lift * 120
       house.roof.visible = house.lift < 0.98
       house.furniture.visible = house.lift > 0.02
       for (const material of house.roofMaterials) {
-        material.transparent = house.lift > 0.01
-        material.opacity = 1 - house.lift
+        const fade = Math.max(house.lift, house.ghost)
+        material.transparent = fade > 0.01
+        material.opacity = 1 - fade
+        material.depthWrite = fade < 0.5
       }
       house.smoke.forEach((puff, i) => {
         puff.visible = house.busy && !house.open
         const t = (now / 2400 + i / house.smoke.length) % 1
-        puff.position.y = WALL + 130 + t * 70
+        puff.position.y = WALL + house.rise + 20 + t * 70
         puff.scale.setScalar(0.6 + t)
         ;(puff.material as MeshStandardMaterial).opacity = 0.8 * (1 - t)
       })
@@ -554,8 +594,8 @@ export class World {
     const dy = event.clientY - this.drag.y
     this.drag = { x: event.clientX, y: event.clientY, moved: this.drag.moved + Math.abs(dx) + Math.abs(dy) }
     // The ground under the pointer follows it: as far across as a pixel spans at the camera's distance.
-    const perPixel = (2 * this.distance * Math.tan((FOV * Math.PI) / 360)) / this.host.clientHeight
-    const shift = new Vector3(-dx * perPixel, 0, (-dy * perPixel) / Math.sin(TILT))
+    const perPixel = (2 * this.distance * Math.tan((this.camera.fov * Math.PI) / 360)) / this.host.clientHeight
+    const shift = new Vector3(-dx * perPixel, 0, (-dy * perPixel) / Math.sin(this.tilt))
     if (Math.abs(dx) + Math.abs(dy) > 0) this.steered = true
     this.look.add(shift)
     this.lookGoal.add(shift)
@@ -597,8 +637,14 @@ export class World {
 
   // --- building things ----------------------------------------------------------------------
 
-  /** The city's roads, and on them each block, a slab of grass its houses stand on. */
+  /**
+   * The city: its paths, and on them each block, a slab of grass its houses stand on, with trees and flowers
+   * where no house, sign, or door is. Built again only when the city's layout changes.
+   */
   private drawCity(town: Town) {
+    const key = `${town.left},${town.top},${town.width},${town.height}|${town.houses.map((h) => `${h.x},${h.y},${h.width},${h.depth}`).join(';')}`
+    if (key === this.cityKey) return
+    this.cityKey = key
     for (const child of [...this.streets.children]) {
       child.removeFromParent()
       dispose(child)
@@ -610,11 +656,80 @@ export class World {
     this.streets.add(road)
     const grass = new MeshStandardMaterial({ color: this.palette.ground, roughness: 1 })
     for (const block of town.blocks) {
-      const slab = new Mesh(new BoxGeometry(BLOCK.width, SLAB - LAYERS.road, block.depth), grass)
+      const slab = new Mesh(new RoundedBoxGeometry(BLOCK.width, SLAB - LAYERS.road, block.depth, 3, 6), grass)
       slab.position.set(block.x + BLOCK.width / 2, (SLAB + LAYERS.road) / 2, block.y + block.depth / 2)
       slab.receiveShadow = true
       this.streets.add(slab)
     }
+    this.plant(town)
+  }
+
+  /**
+   * Trees and flowers on each block, wherever there's room: each spot of a block's grid gets one or none by a
+   * hash of where it is, so a block is planted the same way on every visit. Drawn as instances, a mesh a kind.
+   */
+  private plant(town: Town) {
+    // Where nothing grows: each house, with room around it, and its sign and the walk to its door in front.
+    const clear = town.houses.map((h) => ({ left: h.x - 26, right: h.x + h.width + 26, top: h.y - 26, bottom: h.y + h.depth + PLATE + 30 }))
+    const free = (x: number, z: number) => !clear.some((c) => x > c.left && x < c.right && z > c.top && z < c.bottom)
+    type Spot = { x: number; z: number; size: number; kind: 'round' | 'pine' | 'flowers'; hue: number }
+    const spots: Spot[] = []
+    const step = 74
+    for (const block of town.blocks) {
+      for (let x = block.x + 30; x < block.x + BLOCK.width - 30; x += step)
+        for (let z = block.y + 30; z < block.y + block.depth - 30; z += step) {
+          // A little off the grid, so nothing grows in rows.
+          const jx = x + (hashOf(`${x},${z}:x`) - 0.5) * 40
+          const jz = z + (hashOf(`${x},${z}:z`) - 0.5) * 40
+          if (!free(jx, jz)) continue
+          const roll = hashOf(`${x},${z}`)
+          if (roll < 0.16) spots.push({ x: jx, z: jz, size: 0.8 + hashOf(`${x},${z}:s`) * 0.5, kind: 'round', hue: roll })
+          else if (roll < 0.24) spots.push({ x: jx, z: jz, size: 0.8 + hashOf(`${x},${z}:s`) * 0.4, kind: 'pine', hue: roll })
+          else if (roll < 0.4) spots.push({ x: jx, z: jz, size: 1, kind: 'flowers', hue: hashOf(`${x},${z}:h`) })
+        }
+    }
+    const matrix = new Matrix4()
+    const place = (mesh: InstancedMesh, i: number, x: number, y: number, z: number, scale: number, squash = 1) => {
+      matrix.makeScale(scale, scale * squash, scale).setPosition(x, y, z)
+      mesh.setMatrixAt(i, matrix)
+    }
+    const instanced = (geometry: BufferGeometry, color: string, count: number, shadows = true) => {
+      const mesh = new InstancedMesh(geometry, new MeshStandardMaterial({ color, roughness: 0.95 }), Math.max(1, count))
+      mesh.count = count
+      mesh.castShadow = shadows
+      mesh.receiveShadow = true
+      this.streets.add(mesh)
+      return mesh
+    }
+    const round = spots.filter((s) => s.kind === 'round')
+    const pines = spots.filter((s) => s.kind === 'pine')
+    const flowers = spots.filter((s) => s.kind === 'flowers')
+    const trunks = instanced(new CylinderGeometry(4, 6, 30, 8), this.palette.trunk, round.length + pines.length)
+    const crowns = instanced(new SphereGeometry(26, 14, 10), this.palette.leaves, round.length)
+    const tops = instanced(new SphereGeometry(18, 12, 8), this.palette.leaves, round.length)
+    const cones = instanced(new ConeGeometry(24, 70, 9), this.palette.pine, pines.length)
+    round.forEach((tree, i) => {
+      place(trunks, i, tree.x, SLAB + 15 * tree.size, tree.z, tree.size)
+      place(crowns, i, tree.x, SLAB + 48 * tree.size, tree.z, tree.size, 0.9)
+      place(tops, i, tree.x + 6 * tree.size, SLAB + 68 * tree.size, tree.z - 4 * tree.size, tree.size)
+    })
+    pines.forEach((tree, i) => {
+      place(trunks, round.length + i, tree.x, SLAB + 12 * tree.size, tree.z, tree.size * 0.8)
+      place(cones, i, tree.x, SLAB + 55 * tree.size, tree.z, tree.size)
+    })
+    // Flowers in clumps of five, each clump one color of a few.
+    const petals = this.palette.flowers
+    for (let c = 0; c < petals.length; c++) {
+      const mine = flowers.filter((f) => Math.floor(f.hue * petals.length) === c)
+      const blooms = instanced(new SphereGeometry(4.5, 8, 6), petals[c]!, mine.length * 5, false)
+      mine.forEach((clump, i) => {
+        for (let k = 0; k < 5; k++) {
+          const a = (k / 5) * Math.PI * 2 + clump.hue * 6
+          place(blooms, i * 5 + k, clump.x + Math.cos(a) * 9, SLAB + 5, clump.z + Math.sin(a) * 9, 1)
+        }
+      })
+    }
+    for (const child of this.streets.children) if (child instanceof InstancedMesh) child.instanceMatrix.needsUpdate = true
   }
 
   private build(house: House): HouseThings {
@@ -623,12 +738,19 @@ export class World {
     const p = this.palette
     const group = new Group()
     group.userData.house = house.channel
-    const walls = new MeshStandardMaterial({ color: p.walls, roughness: 0.9 })
+    const walls = new MeshStandardMaterial({ color: p.walls, roughness: 0.85 })
     const lift = LAYERS.floor - LAYERS.slab
-    const floor = new Mesh(new BoxGeometry(w - 2 * wall, lift, h - 2 * wall), new MeshStandardMaterial({ color: p.floor, roughness: 1 }))
+    const floor = new Mesh(new BoxGeometry(w - 2 * wall, lift, h - 2 * wall), new MeshStandardMaterial({ color: p.floor, roughness: 0.9 }))
     floor.position.set(w / 2, lift / 2, h / 2)
     floor.receiveShadow = true
     group.add(floor)
+    // Planks, as lines across the floor.
+    const seam = new MeshStandardMaterial({ color: new Color(p.floor).offsetHSL(0, 0, -0.08), roughness: 1 })
+    for (let z = wall + 24; z < h - wall; z += 24) {
+      const line = new Mesh(new BoxGeometry(w - 2 * wall, 0.4, 1.2), seam)
+      line.position.set(w / 2, lift + 0.2, z)
+      group.add(line)
+    }
     const door = 56
     const side = (w - door) / 2
     const pieces: [number, number, number, number][] = [
@@ -639,33 +761,34 @@ export class World {
       [w - side / 2, h - wall / 2, side, wall], // front, right of the door
     ]
     for (const [x, z, sx, sz] of pieces) {
-      const piece = new Mesh(new BoxGeometry(sx, WALL, sz), walls)
+      const piece = new Mesh(new RoundedBoxGeometry(sx, WALL, sz, 2, Math.min(4, sx / 2.5, sz / 2.5)), walls)
       piece.position.set(x, WALL / 2, z)
       piece.castShadow = true
       piece.receiveShadow = true
       group.add(piece)
     }
-    const step = new Mesh(new BoxGeometry(door + 16, 3, 18), new MeshStandardMaterial({ color: p.street, roughness: 1 }))
-    step.position.set(w / 2, 1.5, h + 9)
-    step.receiveShadow = true
-    group.add(step)
+    const mat = new Mesh(new RoundedBoxGeometry(door - 6, 2, 22, 2, 1), new MeshStandardMaterial({ color: p.mat, roughness: 1 }))
+    mat.position.set(w / 2, 1, h + 12)
+    mat.receiveShadow = true
+    group.add(mat)
 
     const roof = new Group()
-    const slope = new MeshStandardMaterial({ color: new Color(p.roofs[roofOf(house.channel)]), roughness: 0.8, flatShading: true, side: DoubleSide })
-    const chimneyMaterial = new MeshStandardMaterial({ color: p.walls, roughness: 0.9 })
-    const rise = Math.min(130, 60 + Math.min(w, h) * 0.12)
-    const hip = new Mesh(hipRoof(w, h, 12, rise), slope)
+    const slope = new MeshStandardMaterial({ color: new Color(p.roofs[roofOf(house.channel)]), roughness: 0.75, flatShading: true, side: DoubleSide })
+    const chimneyMaterial = new MeshStandardMaterial({ color: p.walls, roughness: 0.85 })
+    // A tall, friendly roof, with deep eaves.
+    const rise = Math.min(170, 90 + Math.min(w, h) * 0.16)
+    const hip = new Mesh(hipRoof(w, h, 20, rise), slope)
     hip.position.y = WALL
     hip.castShadow = true
     roof.add(hip)
-    const chimney = new Mesh(new BoxGeometry(26, rise * 0.7, 26), chimneyMaterial)
+    const chimney = new Mesh(new RoundedBoxGeometry(28, rise * 0.7, 28, 2, 5), chimneyMaterial)
     chimney.position.set(w - Math.min(110, w / 3), WALL + rise * 0.65, h / 2 - h / 7)
     chimney.castShadow = true
     roof.add(chimney)
     const skylights = new MeshStandardMaterial({ color: p.window, emissiveIntensity: 0.6, roughness: 0.4 })
-    const run = h / 2 + 12
+    const run = h / 2 + 20
     for (let x = 70; x < w - 50; x += 120) {
-      const light = new Mesh(new BoxGeometry(36, 4, 26), skylights)
+      const light = new Mesh(new RoundedBoxGeometry(36, 4, 26, 2, 1.5), skylights)
       // On the near slope, halfway down, tipped to lie on it.
       light.position.set(x, WALL + rise / 2 + 2, h / 2 + run / 2)
       light.rotation.x = Math.atan2(rise, run)
@@ -675,7 +798,7 @@ export class World {
 
     const smoke = Array.from({ length: 3 }, () => {
       const puff = new Mesh(new SphereGeometry(9, 10, 8), new MeshStandardMaterial({ color: p.smoke, transparent: true, roughness: 1 }))
-      puff.position.set(chimney.position.x, WALL + 130, chimney.position.z)
+      puff.position.set(chimney.position.x, WALL + rise + 40, chimney.position.z)
       group.add(puff)
       return puff
     })
@@ -683,12 +806,15 @@ export class World {
     furniture.visible = false
     group.add(furniture)
     this.scene.add(group)
-    return { group, roof, roofMaterials: [slope, chimneyMaterial, skylights], skylights, smoke, furniture, furnished: '', size: `${w}x${h}`, lift: 0, open: false, busy: false }
+    return { group, roof, roofMaterials: [slope, chimneyMaterial, skylights], skylights, smoke, furniture, furnished: '', size: `${w}x${h}`, lift: 0, open: false, busy: false, rise, inFront: false, ghost: 0 }
   }
 
-  /** The tables of a house, each with its chairs: only the house you're in has them, under a roof no one sees through. */
+  /**
+   * The inside of the house you're in: a rug, its tables with their chairs, a laptop on each task's desk, a plant
+   * in each corner, and the whiteboard along the back wall. Only the house you're in has any of it.
+   */
   private furnish(things: HouseThings, house: House, open: boolean) {
-    const key = open ? house.tables.map((t) => `${t.thread}@${t.x},${t.y}:${t.task ?? ''}`).join(' ') : ''
+    const key = open ? `${house.width}x${house.depth}|${house.tables.map((t) => `${t.thread}@${t.x},${t.y}:${t.task ?? ''}:${t.seated}`).join(' ')}` : ''
     if (key === things.furnished) return
     things.furnished = key
     for (const child of [...things.furniture.children]) {
@@ -696,96 +822,169 @@ export class World {
       dispose(child)
     }
     if (!open) return
-    const top = new MeshStandardMaterial({ color: this.palette.table, roughness: 0.6 })
-    const seat = new MeshStandardMaterial({ color: this.palette.chair, roughness: 0.8 })
+    const p = this.palette
+    const { width: w, depth: h } = house
+    const lift = LAYERS.floor - LAYERS.slab
+    const wood = new MeshStandardMaterial({ color: p.table, roughness: 0.7 })
+    // A rug under the tables.
+    const rows = house.tables.length > 0 ? house.tables : []
+    if (rows.length > 0) {
+      const left = Math.min(...rows.map((t) => t.x)) - house.x - 20
+      const right = Math.max(...rows.map((t) => t.x + 140)) - house.x + 20
+      const top = Math.min(...rows.map((t) => t.y)) - house.y - 56
+      const bottom = Math.max(...rows.map((t) => t.y)) - house.y + 90
+      const rug = new Mesh(new RoundedBoxGeometry(right - left, 1, bottom - top, 2, 8), new MeshStandardMaterial({ color: p.rug, roughness: 1 }))
+      rug.position.set((left + right) / 2, lift + 0.5, (top + bottom) / 2)
+      rug.receiveShadow = true
+      things.furniture.add(rug)
+    }
     for (const table of house.tables) {
       const desk = new Group()
       desk.userData.thread = table.thread
-      const board = new Mesh(new BoxGeometry(140, 5, 34), top)
-      board.position.y = 22
-      board.castShadow = true
-      board.receiveShadow = true
-      desk.add(board)
-      for (const [lx, lz] of [[-64, -13], [64, -13], [-64, 13], [64, 13]] as const) {
-        const leg = new Mesh(new BoxGeometry(4, 20, 4), top)
-        leg.position.set(lx, 10, lz)
+      const top = new Mesh(new RoundedBoxGeometry(140, 7, 36, 2, 3), wood)
+      top.position.y = 24
+      top.castShadow = true
+      top.receiveShadow = true
+      desk.add(top)
+      for (const [lx, lz] of [[-60, -12], [60, -12], [-60, 12], [60, 12]] as const) {
+        const leg = new Mesh(new CylinderGeometry(2.4, 2.4, 22, 8), wood)
+        leg.position.set(lx, 11, lz)
         desk.add(leg)
       }
-      // A task's table has a screen on it, lit while someone works the task.
+      // A task's desk has a laptop on it, its screen lit while someone works the task.
       if (table.task) {
-        const screen = new Mesh(new BoxGeometry(34, 22, 3), new MeshStandardMaterial({ color: '#1d2430', emissive: table.task === 'claimed' ? '#3aa0ff' : '#000000', emissiveIntensity: 0.5 }))
-        screen.position.set(0, 37, 0)
-        desk.add(screen)
+        const shell = new MeshStandardMaterial({ color: '#e9edf2', roughness: 0.5 })
+        const base = new Mesh(new RoundedBoxGeometry(34, 2, 22, 2, 1), shell)
+        base.position.set(0, 29, 2)
+        const lid = new Mesh(new RoundedBoxGeometry(34, 22, 2, 2, 1), shell)
+        lid.position.set(0, 40, -9)
+        lid.rotation.x = -0.25
+        const glass = new Mesh(new BoxGeometry(30, 17, 0.6), new MeshStandardMaterial({ color: '#1d2430', emissive: table.task === 'claimed' ? '#5fb8ff' : '#000000', emissiveIntensity: 0.6 }))
+        glass.position.set(0, 40, -7.8)
+        glass.rotation.x = -0.25
+        desk.add(base, lid, glass)
       }
-      desk.position.set(table.x - house.x + 70, 0, table.y - house.y + 17)
+      desk.position.set(table.x - house.x + 70, lift, table.y - house.y + 17)
       things.furniture.add(desk)
-      // A task's desk has one chair, for whoever works it; any other table one more than sit at it.
+      // Chairs in a color of the table's own; a task's desk has one, any other table one more than sit at it.
+      const seat = new MeshStandardMaterial({ color: new Color().setHSL(hashOf(table.thread), 0.45, 0.68), roughness: 0.8 })
       const chairs = table.task ? 1 : Math.min(table.chairs.length, Math.max(2, table.seated + 1))
       table.chairs.slice(0, chairs).forEach((chair, i) => {
         const piece = new Group()
         piece.userData.thread = table.thread
-        const cushion = new Mesh(new BoxGeometry(22, 4, 20), seat)
+        const cushion = new Mesh(new RoundedBoxGeometry(22, 6, 20, 2, 2.5), seat)
         cushion.position.y = 13
-        const back = new Mesh(new BoxGeometry(22, 20, 4), seat)
+        const back = new Mesh(new RoundedBoxGeometry(22, 20, 5, 2, 2.2), seat)
         // Its back away from the table.
-        back.position.set(0, 24, i < 3 ? -10 : 10)
+        back.position.set(0, 25, i < 3 ? -9 : 9)
         piece.add(cushion, back)
         for (const child of piece.children) child.castShadow = true
-        piece.position.set(chair.x - house.x + 15, 0, chair.y - house.y + 15)
+        piece.position.set(chair.x - house.x + 15, lift, chair.y - house.y + 15)
         things.furniture.add(piece)
       })
     }
+    // A plant in each corner of the room.
+    const pot = new MeshStandardMaterial({ color: p.pot, roughness: 0.8 })
+    const leaves = new MeshStandardMaterial({ color: p.leaves, roughness: 0.9 })
+    for (const [x, z] of [[WALL_THICK + 18, WALL_THICK + 18], [w - WALL_THICK - 18, WALL_THICK + 18], [WALL_THICK + 18, h - WALL_THICK - 30], [w - WALL_THICK - 18, h - WALL_THICK - 30]] as const) {
+      const plant = new Group()
+      const base = new Mesh(new CylinderGeometry(9, 7, 14, 12), pot)
+      base.position.y = 7
+      const bush = new Mesh(new SphereGeometry(13, 12, 10), leaves)
+      bush.position.y = 24
+      plant.add(base, bush)
+      for (const part of plant.children) part.castShadow = true
+      plant.position.set(x, lift, z)
+      things.furniture.add(plant)
+    }
+    // The whiteboard: a frame on two legs, along the back wall, facing the room. Its words are the page's.
+    const board = boardOf(house)
+    const frame = new MeshStandardMaterial({ color: p.table, roughness: 0.7 })
+    const panel = new Mesh(new RoundedBoxGeometry(board.width, board.height, 3, 2, 2), new MeshStandardMaterial({ color: '#ffffff', emissive: '#ffffff', emissiveIntensity: 0.25, roughness: 0.4 }))
+    panel.position.set(w / 2, lift + board.bottom + board.height / 2, board.z)
+    const rim = new Mesh(new RoundedBoxGeometry(board.width + 10, board.height + 10, 2, 2, 3), frame)
+    rim.position.set(w / 2, lift + board.bottom + board.height / 2, board.z - 1.5)
+    const tray = new Mesh(new RoundedBoxGeometry(board.width * 0.5, 3, 8, 2, 1), frame)
+    tray.position.set(w / 2, lift + board.bottom - 2, board.z + 5)
+    things.furniture.add(panel, rim, tray)
+    for (const lx of [w / 2 - board.width / 2 + 8, w / 2 + board.width / 2 - 8]) {
+      const leg = new Mesh(new CylinderGeometry(2.4, 2.4, board.bottom + 4, 8), frame)
+      leg.position.set(lx, lift + (board.bottom + 4) / 2, board.z - 2)
+      things.furniture.add(leg)
+    }
+    for (const part of [panel, rim]) part.castShadow = true
   }
 
-  /** A person, rounded, with hair and eyes; or an agent, boxy, with a screen for a face. Each in a color of their own. */
+  /**
+   * Someone, small and round. A person: a big round head with hair, dot eyes, and rosy cheeks, on a little
+   * body with feet. An agent: a rounded robot with a screen for a face and a light on its antenna. Each in a
+   * color of their own.
+   */
   private figure(resident: Resident, at: Vector3, door: Vector3): PersonThings {
     const group = new Group()
     const body = new Group()
     group.add(body)
-    const tint = new Color().setHSL(hue(resident.actor), 0.5, 0.52)
-    const shirt = new MeshStandardMaterial({ color: tint, roughness: 0.6 })
-    const dark = new MeshStandardMaterial({ color: '#1f232a', roughness: 0.5 })
+    const tint = new Color().setHSL(hue(resident.actor), 0.55, 0.62)
+    const shirt = new MeshStandardMaterial({ color: tint, roughness: 0.7 })
+    const dark = new MeshStandardMaterial({ color: '#2a2320', roughness: 0.5 })
     const materials = [shirt, dark]
     if (resident.agent) {
-      const trunk = new Mesh(new BoxGeometry(18, 20, 14), shirt)
-      trunk.position.y = 15
-      const metal = new MeshStandardMaterial({ color: tint.clone().offsetHSL(0, -0.25, 0.25), roughness: 0.35, metalness: 0.3 })
-      const head = new Mesh(new BoxGeometry(20, 16, 16), metal)
-      head.position.y = 34
-      const face = new Mesh(new BoxGeometry(16, 10, 1), dark)
-      face.position.set(0, 34, 8.2)
-      const glow = new MeshStandardMaterial({ color: '#7fe3ff', emissive: '#7fe3ff', emissiveIntensity: 0.8 })
-      for (const ex of [-4, 4]) {
-        const eye = new Mesh(new BoxGeometry(3, 3, 1), glow)
-        eye.position.set(ex, 35, 8.8)
+      const shell = new MeshStandardMaterial({ color: tint.clone().offsetHSL(0, -0.2, 0.18), roughness: 0.45 })
+      const trunk = new Mesh(new RoundedBoxGeometry(18, 18, 14, 3, 5), shirt)
+      trunk.position.y = 14
+      const head = new Mesh(new RoundedBoxGeometry(24, 20, 20, 3, 7), shell)
+      head.position.y = 35
+      const face = new Mesh(new RoundedBoxGeometry(18, 12, 1.5, 2, 2), dark)
+      face.position.set(0, 35, 10)
+      const glow = new MeshStandardMaterial({ color: '#8ff0ff', emissive: '#8ff0ff', emissiveIntensity: 0.9 })
+      for (const ex of [-4.5, 4.5]) {
+        const eye = new Mesh(new SphereGeometry(2, 8, 6), glow)
+        eye.position.set(ex, 36, 10.8)
         body.add(eye)
       }
-      const antenna = new Mesh(new CylinderGeometry(0.8, 0.8, 10), metal)
-      antenna.position.y = 47
-      const tip = new Mesh(new SphereGeometry(2.4, 8, 6), glow)
-      tip.position.y = 53
+      const antenna = new Mesh(new CylinderGeometry(0.9, 0.9, 9), shell)
+      antenna.position.y = 49
+      const tip = new Mesh(new SphereGeometry(2.8, 10, 8), glow)
+      tip.position.y = 55
+      for (const fx of [-5, 5]) {
+        const foot = new Mesh(new SphereGeometry(4, 10, 8), shell)
+        foot.scale.set(1, 0.6, 1.3)
+        foot.position.set(fx, 3, 1)
+        body.add(foot)
+      }
       body.add(trunk, head, face, antenna, tip)
-      materials.push(metal, glow)
+      materials.push(shell, glow)
     } else {
-      const skin = new MeshStandardMaterial({ color: new Color().setHSL(0.07, 0.45, 0.62 + (hue(`${resident.actor}:skin`) - 0.5) * 0.25), roughness: 0.7 })
-      const hair = new MeshStandardMaterial({ color: new Color().setHSL(hue(`${resident.actor}:hair`) * 0.12, 0.45, 0.18 + hue(`${resident.actor}:shade`) * 0.3), roughness: 0.8 })
-      const trunk = new Mesh(new CapsuleGeometry(8, 12, 4, 12), shirt)
-      trunk.position.y = 15
-      const head = new Mesh(new SphereGeometry(9, 18, 14), skin)
-      head.position.y = 35
-      const cap = new Mesh(new SphereGeometry(9.6, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2.1), hair)
-      cap.position.y = 36
-      cap.rotation.x = -0.25
-      for (const ex of [-3.4, 3.4]) {
-        const eye = new Mesh(new SphereGeometry(1.4, 8, 6), dark)
-        eye.position.set(ex, 35.5, 8.4)
-        body.add(eye)
+      const skin = new MeshStandardMaterial({ color: new Color().setHSL(0.07, 0.5, 0.7 + (hue(`${resident.actor}:skin`) - 0.5) * 0.22), roughness: 0.8 })
+      const hair = new MeshStandardMaterial({ color: new Color().setHSL(hue(`${resident.actor}:hair`) * 0.1, 0.5, 0.2 + hue(`${resident.actor}:shade`) * 0.32), roughness: 0.85 })
+      const blush = new MeshStandardMaterial({ color: '#f59a9a', roughness: 1 })
+      const trunk = new Mesh(new CapsuleGeometry(7.5, 8, 4, 12), shirt)
+      trunk.position.y = 13
+      const head = new Mesh(new SphereGeometry(12.5, 20, 16), skin)
+      head.position.y = 34
+      const cap = new Mesh(new SphereGeometry(13.2, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), hair)
+      cap.position.set(0, 35.5, -1)
+      cap.rotation.x = -0.35
+      for (const ex of [-4.3, 4.3]) {
+        const eye = new Mesh(new SphereGeometry(1.7, 8, 6), dark)
+        eye.scale.set(1, 1.35, 1)
+        eye.position.set(ex, 34, 11.8)
+        const cheek = new Mesh(new SphereGeometry(2.3, 8, 6), blush)
+        cheek.scale.set(1.2, 0.7, 0.5)
+        cheek.position.set(ex * 1.65, 30.5, 10.4)
+        body.add(eye, cheek)
+      }
+      for (const fx of [-3.5, 3.5]) {
+        const foot = new Mesh(new SphereGeometry(3.4, 10, 8), dark)
+        foot.scale.set(1, 0.6, 1.4)
+        foot.position.set(fx, 2.5, 1.5)
+        body.add(foot)
       }
       body.add(trunk, head, cap)
-      materials.push(skin, hair)
+      materials.push(skin, hair, blush)
     }
     for (const part of body.children) part.castShadow = true
-    const ring = new Mesh(new RingGeometry(13, 17, 32), new MeshStandardMaterial({ color: this.palette.bright }))
+    const ring = new Mesh(new RingGeometry(14, 18, 32), new MeshStandardMaterial({ color: this.palette.bright }))
     ring.rotation.x = -Math.PI / 2
     ring.position.y = 1
     group.add(ring)
@@ -831,6 +1030,13 @@ function hipRoof(w: number, h: number, over: number, rise: number): BufferGeomet
   geometry.setAttribute('position', new Float32BufferAttribute(faces.flat(2), 3))
   geometry.computeVertexNormals()
   return geometry
+}
+
+/** A number in [0, 1) for a text, the same every time: where a tree grows, and what kind. */
+function hashOf(text: string): number {
+  let hash = 2166136261
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619)
+  return ((hash >>> 0) % 100_000) / 100_000
 }
 
 function hue(text: string): number {
