@@ -1530,6 +1530,11 @@ describe("a task's root", () => {
     for (const id of [failed.id, canceled.id]) expect((await ada('POST', `/messages/${id}/delete`, {})).status).toBe(200)
     expect((await read(ada, failed.id)).task).toMatchObject({ state: 'canceled', result: null, reason: 'deleted' })
     expect((await read(ada, canceled.id)).task).toMatchObject({ state: 'canceled', result: null, reason: null })
+    // Nor do the events that set them, read from the feed's end.
+    const ended = (await ada('GET', '/events?all=true&last=50')).body.events as BoardEventView[]
+    const said = JSON.stringify(ended.filter((event) => event.type === 'task.completed' || event.type === 'task.canceled'))
+    expect(said).toContain('task.completed')
+    expect(said).not.toContain('sk-123')
   })
 })
 
