@@ -692,9 +692,10 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border: 1px solid var(--ink);
-  background: var(--walls);
-  color: var(--bright);
+  /* Signs are painted wood, the same in light and dark: dark text on cream, 12:1. */
+  border: 1px solid #6b5a48;
+  background: #fff6e6;
+  color: #3d2e22;
   font-size: 12px;
   white-space: nowrap;
   /* A long channel name is cut short: its sign stays about its house's width. Its title has it in full. */
@@ -710,25 +711,25 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
 .town .whiteboard .tally b { color: #b8452f; }
 .town .whiteboard button { display: block; width: 100%; padding: 0; text-align: left; color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .town .whiteboard button:hover { text-decoration: underline; }
-.town .whiteboard .ago { color: #7a8aa8; }
+.town .whiteboard .ago { color: #4f5f80; }
 .town .plate.open .name { text-decoration: underline; text-underline-offset: 3px; }
-.town .plate .count { padding: 0 5px; background: var(--bright); color: var(--bg); font-size: 10px; line-height: 16px; }
+.town .plate .count { padding: 0 5px; background: #3d2e22; color: #fff6e6; font-size: 10px; line-height: 16px; }
 .town .table-label button {
   display: grid;
   padding: 1px 4px;
-  background: var(--bg);
-  border: 1px solid var(--ink);
-  color: var(--bright);
+  background: #fff6e6;
+  border: 1px solid #6b5a48;
+  color: #3d2e22;
   font-size: 9.5px;
   line-height: 1.3;
   text-align: left;
 }
-.town .table-label button:hover { border-color: var(--bright); }
+.town .table-label button:hover { border-color: #3d2e22; }
 /* A grid's items don't shrink past their text unless told: without this a long label runs over its neighbors. */
 .town .table-label button { overflow: hidden; }
 .town .table-label .label, .town .table-label .state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.town .table-label .state { color: var(--muted); font-size: 9px; }
-.town .table-label .state.claimed { color: #2f7fd8; }
+.town .table-label .state { color: #6b5a48; font-size: 9px; }
+.town .table-label .state.claimed { color: #1d5fa8; }
 /* Names float as dark pills, as people's do in a virtual office: a dot says who's around. */
 .town .stack { display: grid; justify-items: center; gap: 4px; }
 /* A table's label, its pill, and what's said there are as wide as the table at most: the scene sets --fit as
@@ -775,7 +776,7 @@ button.file:hover { background: var(--shade-hover); color: var(--bright); }
   animation: quest 1.4s ease-in-out infinite;
 }
 .town .quest b { font-size: 15px; line-height: 1; }
-.town .quest.mention { background: #ff5a4f; color: #fff; box-shadow: 0 0 0 2px rgba(60, 8, 4, 0.85), 0 3px 8px rgba(0, 0, 0, 0.3); }
+.town .quest.mention { background: #c8352b; color: #fff; box-shadow: 0 0 0 2px rgba(60, 8, 4, 0.85), 0 3px 8px rgba(0, 0, 0, 0.3); }
 /* In a table's pill: small, and still, so the pill reads. */
 .town .quest.inline { min-width: 16px; height: 16px; padding: 0 4px; margin: 0 1px 0 -2px; font-size: 11px; animation: none; box-shadow: none; }
 @keyframes quest { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
