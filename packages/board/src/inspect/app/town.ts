@@ -401,7 +401,11 @@ function threadsBy(state: State, messages: MessageView[], now: number, seen: See
   const unseen = new Map<string, Unseen>()
   for (const message of messages) {
     const thread = message.re ?? message.id
-    const since = Object.hasOwn(seen, thread) ? seen[thread]! : Object.hasOwn(seen, FIRST_VISIT) ? seen[FIRST_VISIT]! : ''
+    // Seen up to the later of when you last looked at it and your first visit: a reply that loads only now, written
+    // before you first came, is old news even in a thread you've looked at since.
+    const looked = Object.hasOwn(seen, thread) ? seen[thread]! : ''
+    const came = Object.hasOwn(seen, FIRST_VISIT) ? seen[FIRST_VISIT]! : ''
+    const since = looked > came ? looked : came
     if (message.by.actor === me || message.createdAt <= since) continue
     const mentions = me !== undefined && message.text.includes(`@[${me}]`)
     if (mentions) unseen.set(thread, 'mention')

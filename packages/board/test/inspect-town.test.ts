@@ -299,6 +299,14 @@ describe('threads you have not seen', () => {
     expect(Object.fromEntries(town.houses[0]!.tables.map((t) => [t.thread, t.unseen]))).toEqual({ '1': null, '2': 'new' })
   })
 
+  it('counts a reply that loads late as seen when it was written before your first visit, even in a thread with its own mark', () => {
+    // Thread 1's mark is older than your first visit: a reply between the two, loading only now, is old news.
+    const reply = message(50, FX, 'dev', { re: '1', createdAt: at(50_000) })
+    const state = stateOf(['dev'], [...discussion(1, ADA, 'dev', { createdAt: at(60_000) }), reply])
+    const town = townOf(state, NOW, { seen: { '1': at(55_000), [FIRST_VISIT]: at(40_000) } })
+    expect(town.houses[0]!.tables[0]!.unseen).toBeNull()
+  })
+
   it('marks a mention of you over a plain new reply, and never what you wrote yourself', () => {
     const mention = message(5, ADA, 'dev', { re: '1', text: `over to @[${ME}]`, createdAt: at(10_000) })
     const mine = message(6, ME, 'dev', { re: '2', createdAt: at(10_000) })
