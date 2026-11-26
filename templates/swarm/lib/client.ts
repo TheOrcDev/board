@@ -19,5 +19,6 @@ export const start = (config: Record<string, unknown>) => call<{ slug: string }>
 export const stop = (slug: string) => call(`/api/runs/${part(slug)}/stop`, { body: {} });
 export const ask = (slug: string, prompt: string) => call<{ made: number }>(`/api/runs/${part(slug)}/tasks`, { body: { prompt } });
 export const say = (id: string, text: string) => call(`/api/tasks/${part(id)}/replies`, { body: { text } });
+export const answer = (id: string, text: string) => call<{ id: string }>(`/api/tasks/${part(id)}/answer`, { body: { text } });
 export const thread = (id: string) => call<Awaited<ReturnType<typeof history>>>(`/api/tasks/${part(id)}`);
 export const runs = (limit = 20) => call<{ runs: unknown[] }>(`/api/runs?limit=${limit}`);

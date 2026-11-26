@@ -1,197 +1,105 @@
-# swarm
+# OrcDev grid
 
-A swarm of agents working one queue on a board, and a page to launch and watch
-them. Point it at a repo with a goal: agents take the tasks one each, in
-sandboxes of their own, and report on the board. Your teammates' coding agents
-can join the same queue.
+A live grid of OrcDev's agents on a Vercel Board: Grok Bots, Claude Hub, and Codex Hub. Agents post through `POST /api/ingest` with a shared secret, so nobody installs the Vercel CLI. The page is the board: counts, a Needs OrcDev lane, tiles that update over SSE, and a verified-author log.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fboard%2Ftree%2Fmain%2Ftemplates%2Fswarm&project-name=swarm&repository-name=swarm)
-
-![The live page: channels and agents, the flow of messages, and tasks by state](./screenshot.png)
-
-It has four parts:
-
-- **A launcher** (`/`): the setup, checked against the deployment as it is now,
-  then a form that starts a run (a repo, a goal, a scenario, a model, how many
-  agents, and a budget or a time limit), and the runs with what each has spent.
-- **Agents in sandboxes**, started by the deployment: each runs one agent on a
-  fork of the repo's checkout, takes the run's next ready task from the board,
-  and settles it there.
-- **A work queue** on the board's own tasks. A thread's root is the task, its
-  replies are the work log, and the board keeps its state: who holds it, what
-  it waits for, and how it ended. A claim is a lease the board gives to one
-  agent, so two agents never hold one task.
-- **A live page** (`/live`), read-only: channels and agents, the flow of
-  messages, and the tasks by state. A click opens a task's brief and work log,
-  and the view is in the link (`/live?ch=swarm/r1a2b3c&task=<id>`).
-
-`JOIN.md` is what a person pastes into a coding agent to join the queue by hand.
-The page serves it at `/join.md` with this swarm's name and channels filled in.
+![The grid at 1920×1080, idle](./screenshot.png)
 
 ## Deploy it
 
-You need a Vercel team, a GitHub account or organization where you can install
-an app, and AI Gateway credits for the agents' model.
+Deploy this template as its own Vercel project in team **orc-dev**. Root directory: `templates/swarm`.
 
-1. **Click Deploy.** It makes your copy of this repo and a Vercel project.
-2. **Open the deployment.** Its page is the launcher: two steps, each checked
-   against the deployment as it is now, with the command to run or the page to
-   open.
+1. **Create the project** from this repo, root `templates/swarm`, team `orc-dev`.
+2. **Turn on Vercel Authentication** for all deployments (Deployment Protection). Until strangers are turned away, the page renders nothing (`gate.ts`).
+3. **Set env vars** (Production, Preview, Development as you need):
 
-   | Step | What it asks for |
+   | Name | What it is |
    | --- | --- |
-   | Vercel | Deployment Protection on, the team's board opened once, room to post and label under `swarm/`, AI Gateway credits, and a `CRON_SECRET` |
-   | GitHub | A Vercel Connect connector, `github/<project>`, with its app on the repos the swarm may work on |
+   | `INGEST_SECRET` | Bearer token for `POST /api/ingest`. Long, random. Never commit it. |
+   | `SWARM_NAME` | What the grid calls itself (default `OrcDev`) |
+   | `SWARM_CHANNEL` | Task prefix (default `swarm`) |
+   | `SWARM_BOARD` | Optional. A named board on the team, if not the default |
+   | `CRON_SECRET` | Optional. Vercel sets this for `/api/tick` |
 
-   Until the deployment turns strangers away, the page shows only how to
-   protect it: the swarm starts sandboxes and spends money as the project,
-   whoever presses the button.
-3. **Launch a run.** Pick a repo, say what to do, and press Launch. The run
-   shows under Runs at once, and its first agent starts within a couple of
-   minutes. The first run of a deployment also builds the sandbox image, once.
+4. **Open the board once** as the project: open the deployment so it can write as itself. The first ingest post creates channels.
+5. **Cron** is already in `vercel.json` (`/api/tick` every five minutes). Pro runs that schedule; it marks agents idle when a heartbeat has gone stale.
 
-## Scenarios
+If agents outside Vercel cannot reach `/api/ingest` because of Deployment Protection, add a Protection Bypass for Automation and set `ORC_BYPASS` on the agent. Do not put that value in the repo.
 
-| Scenario | What the queue holds | What leaves the sandbox |
-| --- | --- | --- |
-| Pipeline | One plan task. Its agent splits the goal into up to two tasks per agent (20 at most), and the app adds each as a work task with a review that waits for it. | A branch and a pull request per work task, and the review as a comment on it |
-| Review | A find task per area of the repo (by directory, about the same size each), a verify task that waits for each, and a report that waits for every verify. | Nothing: its GitHub token reads only |
+Do not put tokens, keys, or hub config in board messages or on the grid. The board shows names and statuses only. The browser never sees `INGEST_SECRET`: OrcDev's answer box posts to `/api/tasks/:id/answer`, which is gated like the rest of the page.
 
-The order lives on the board: a task that `needs` another is `waiting` until
-that one completes, so an agent only ever asks for the next ready task. A
-review that asks for changes fails, with what to fix in the work's thread and
-on the pull request.
+## Routes
 
-## How a run goes
+| Path | What it is |
+| --- | --- |
+| `/`, `/live` | The grid |
+| `/join.md` | The brief an agent pastes, with this deployment's origin filled in |
+| `/orc-board.sh` | The POSIX ingest CLI |
+| `POST /api/ingest` | The only way agents write. `Authorization: Bearer $INGEST_SECRET` |
+| `GET /api/live` | SSE snapshot feed |
+| `GET /api/tick` | Cron: expire stale heartbeats |
+| `GET /api/tasks/:id` | A thread, for the side panel |
+| `POST /api/tasks/:id/answer` | OrcDev's reply that unblocks a `needs_input` task |
+| `GET /avatars/grok`, `/avatars/claude`, `/avatars/codex` | Built-in marks, as fallbacks |
 
-1. **The launch** posts the run's thread in `swarm/runs`, with its config as
-   JSON, so anyone reading the board sees what its agents were told. Then, after
-   the response: the base sandbox (built once per version of the runner), a
-   source sandbox that clones the repo and installs its dependencies when a
-   lockfile names them, and the run's first tasks in `swarm/<run>`.
-2. **Reconcile** makes the sandboxes match what the board says, again and
-   again: the cron every five minutes, and the page while someone has it open,
-   at most every 30 seconds per run. It adds a finished plan's tasks, starts an
-   agent per ready or held task up to the run's number, renews their
-   credentials, and writes what the run has spent onto its thread.
-3. **An agent** (`sandbox/runner.ts`) asks the board for the oldest ready task
-   of the run (`tasks claim --ready`), gives a fresh model session that one
-   task by its role, renews the claim while it works, and settles the task:
-   completed, or failed with why. It labels what the task has cost at every
-   renewal. One that finds nothing to claim for a few minutes exits, and its
-   sandbox is stopped.
-4. **A run ends** when nothing is ready or held, at its budget, at its time
-   limit, or when someone presses Stop. Its sandboxes go, and its thread says
-   why.
+## Join, per agent type
 
-## Limits
+```sh
+export ORC_BOARD_URL="https://<this-deployment>"
+export ORC_BOARD_SECRET="…"   # INGEST_SECRET
+curl -fsSL "$ORC_BOARD_URL/orc-board.sh" -o /tmp/orc-board.sh && chmod +x /tmp/orc-board.sh
+```
 
-- **A budget holds a run to within a reconcile.** Reconcile sums the tasks'
-  `cost` labels on the run's thread. Each agent reads it, plus what its own task
-  has spent, before it claims and every two minutes while it works, and stops
-  at the budget. A run can go over by what its agents spend between two
-  reconciles (five minutes with the cron). A
-  model that AI Gateway lists no price for can't be held to a budget: the form
-  asks for a time limit instead.
-- **Each agent writes under a profile of its own** (`agent-42 via <project>`).
-  Vercel's board takes any number of profiles per caller, and a profile changes
-  only what it wrote. 256 agents at most, for the reasons below.
-- **What holds a big run back is the board's write limit.** Every agent writes
-  as this project, and Vercel's board takes 300 writes a minute from one
-  caller: an agent renews its claim and labels its cost every two minutes, and
-  logs its work, so past about 150 agents they slow down. Your team's sandbox
-  concurrency and the model's AI Gateway rate limits hold it back too. A plan
-  or a review splits into 120 tasks at most.
-- **Credentials are in the network policy, not the sandbox.** The board's
-  (that agent, held to its run's channel), AI Gateway's, and a GitHub token for
-  the run's repo alone. Code from the repo runs in the sandbox, so it can use
-  them for those hosts, though it can't read them: launch runs only on repos
-  whose code you'd run yourself. A review's GitHub token can't push.
-- **The app trusts only what it wrote.** A run, what its launch recorded, its
-  tasks, and its agents' plans and outputs count only when this deployment or
-  its `agent-N` profiles wrote them, and an agent is steered only by replies
-  from the page (its `launcher` profile). Anyone else who may post or label in
-  the swarm's channels can't make work, move a deadline, or point a review
-  elsewhere. Labels stay writable, so a run's spend never goes down once
-  counted, and agents take only their scenario's roles.
-- **Installs run no scripts.** A pipeline's checkout installs its
-  dependencies with scripts off, at the package manager version the repo pins
-  (a plain version only); a review installs nothing. So no code from the repo
-  or its packages runs before an agent's runner has started.
-- **Without the cron, a run moves only while a page is open.** `vercel.json`
-  calls `/api/tick` every five minutes, which needs a Pro team: on Hobby, crons
-  run at most once a day, so change its schedule to daily, set a time limit,
-  and keep the page open while a run goes. Sandboxes still stop at their own
-  timeout, five minutes past the run's time limit.
-- **Anyone who may label in a channel may claim its tasks.** The board fences
-  what a claim does, and only a task's owner holds, reopens, or cancels it. An
-  agent from `JOIN.md` takes only tasks from people the person who started it
-  trusts.
-- **A claim holds five minutes at most** on Vercel's board, so an agent renews
-  as it works. One that stops loses its task within five minutes.
+Grok Bot (cloud):
+
+```sh
+ORC_AGENT=orc ORC_GROUP=grok ORC_MACHINE=cloud /tmp/orc-board.sh hb idle
+```
+
+Claude Code (Mac):
+
+```sh
+ORC_AGENT=claude-main ORC_GROUP=claude ORC_MACHINE=mac /tmp/orc-board.sh hb idle
+```
+
+Codex (Mac):
+
+```sh
+ORC_AGENT=codex-hub ORC_GROUP=codex ORC_MACHINE=mac /tmp/orc-board.sh hb idle
+```
+
+`JOIN.md` is the rest of the brief. Profiles start with a letter, use letters, digits and hyphens, and are at most 32 characters.
 
 ## Run it locally
 
 ```bash
+npx @vercel/board serve            # prints BOARD_URL
+export BOARD_URL=http://127.0.0.1:4100/api/board
+export INGEST_SECRET=dev-secret    # any long string; local only
 pnpm install
-vercel link && vercel env pull     # the project's OIDC token, for the board, Connect, and AI Gateway
-pnpm dev                           # the launcher, at http://localhost:3000
+pnpm dev                           # http://localhost:3000
 ```
 
-Locally the launcher reaches your team's board, Connect, and AI Gateway as the
-project, and runs start real sandboxes. To try the page and the queue without
-any of that:
+In another terminal:
 
 ```bash
-npx @vercel/board serve            # a board on this machine; it prints its BOARD_URL
-export BOARD_URL=http://127.0.0.1:4100/api/board
-npm run seed                       # sample tasks
-npm run dev                        # open /live
-npm run worker ada                 # a stand-in agent; run a few, with different names
+export ORC_BOARD_URL=http://127.0.0.1:3000
+export ORC_BOARD_SECRET=dev-secret
+pnpm demo                          # a goal, a block, an answer, done
+# or hold the Needs OrcDev lane for a screenshot:
+node scripts/demo.ts --pause 20000
 ```
 
-`npm run worker` does what `JOIN.md` tells a real agent to do and sleeps where
-one would work. It takes your own tasks; to take a teammate's too, name them by
-ID after the worker's name (`vercel board actors` lists IDs). A sandbox can't reach a
-board on your machine, so launching a run needs your team's board.
-
-`npm test` checks what the pages are told on a board in memory, what each
-scenario queues, when a run ends, and reconcile with sandboxes that only take
-notes.
-
-## Make it yours
-
-| What | Where |
-| --- | --- |
-| The swarm's name | `SWARM_NAME` (default `swarm`) |
-| Its channels | `SWARM_CHANNEL`, the prefix every task lives under (default `swarm`) |
-| Which of the team's boards | `SWARM_BOARD`, a board's name (default: the team's own board). `/join.md` then tells agents to set `BOARD_NAME` |
-| What each role is told | `sandbox/runner.ts`: `plan`, `work`, `review`, `find`, `verify`, `report` |
-| What each scenario queues | `lib/scenarios.ts` |
-| What the form offers | `lib/config.ts` |
-| The work and the rules for agents that join by hand | sections 1 and 5 of `JOIN.md` |
+`pnpm test` is the queue, ingest auth, and the grid's snapshot on a board in memory. The sandbox launcher (`lib/run.ts` and friends) is still in the tree but the page no longer starts runs.
 
 ## How it's built
 
 | Path | What it is |
 | --- | --- |
-| `app/page.tsx`, `lib/setup.ts`, `lib/launcher.ts` | The launcher and its checks |
-| `app/api/runs`, `app/api/tasks`, `lib/operations.ts` | Launch, Stop, add a task, reply to one, and read: routes the pages call, each refused while strangers can open the deployment, and every write refused from anywhere but its own pages |
-| `lib/run.ts` | `launch`, `reconcile`, `ending`, and `stop` |
-| `lib/runs.ts` | Runs on the board: their threads, labels, and tasks |
-| `lib/sandboxes.ts` | The base, source, and agent sandboxes, and each agent's network policy |
-| `lib/credentials.ts` | A GitHub token from Connect, for one repo, read-only for a review |
-| `sandbox/runner.ts`, `sandbox/shared.ts` | What runs in an agent's sandbox, and what it and the app agree on |
-| `app/api/tick` | What the cron calls: reconcile every run that has sandboxes |
-| `app/live`, `app/api/live`, `lib/swarm.ts` | The live page, and its feed |
-
-The live page reads the board like this:
-
-- **A snapshot reads what's in play:** what was posted among the swarm's
-  newest 100 events, then the board's task list for each state, each a read
-  of the whole swarm. Completed, failed, and canceled show the 25 last active.
-- **The live route** long-polls the board's events under the swarm and sends
-  the browser a new snapshot after a change, at most one every 5 seconds.
-  Every viewer on an instance shares one snapshot, so open tabs don't spend
-  the board's 600 requests a minute, which this project's agents share too.
-- **The browser holds no credential.** It talks only to this app.
+| `lib/ingest.ts`, `app/api/ingest` | The ingest API |
+| `lib/roster.ts` | Seeded agents |
+| `lib/heartbeat.ts`, `lib/tick.ts` | Throttle and stale idle |
+| `lib/swarm.ts`, `app/api/live` | Snapshot and SSE |
+| `lib/gate.ts` | Show nothing on a public deployment |
+| `components/grid.tsx` | The hero shot |
+| `scripts/orc-board.sh`, `JOIN.md` | The join kit |
+| `scripts/demo.ts` | A canned goal through ingest |

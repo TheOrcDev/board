@@ -1,7 +1,7 @@
-/* board's docs, in grayscale: dark by default, light when the system asks. Color only for states. */
+/* Dark by default for the grid on camera. Light only if the system insists. */
 :root {
-  color-scheme: light dark;
-  --bg: #040404;
+  color-scheme: dark;
+  --bg: #07080a;
   --shade: #161616;
   --shade-hover: #1b1b1b;
   --line: #252525;
@@ -15,7 +15,7 @@
   --ready: #3ecf8e;
   --review: #f5a623;
   --bad: #ff5f56;
-  --header: 40px;
+  --header: 0px;
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: 87.5%;
 }

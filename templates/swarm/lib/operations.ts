@@ -4,7 +4,8 @@ import { githubToken } from "@/lib/credentials";
 import { OPEN, open } from "@/lib/gate";
 import { models } from "@/lib/models";
 import { ask as askRun, begin, launch, PROMPT_MAX, stop as stopRun } from "@/lib/run";
-import { LAUNCHER, RUNS, SWARM, team } from "@/lib/board";
+import { AGENTS, LAUNCHER, RUNS, SWARM, team } from "@/lib/board";
+import { answerTask } from "@/lib/ingest";
 import { runs, SLUG } from "@/lib/runs";
 import { history } from "@/lib/swarm";
 
@@ -114,8 +115,20 @@ export async function say(host: string | null, id: string, text: unknown): Promi
     const { message } = await board.thread(id);
     // Only a task's thread in the swarm: never the runs channel, where the launch records what the
     // run's agents start from, and never a thread that isn't a task.
-    if (!message.channel.startsWith(SWARM) || message.channel === RUNS || !message.task) throw new Error(`${id} isn't a task in ${SWARM}`);
+    if ((!message.channel.startsWith(SWARM) && !message.channel.startsWith(AGENTS)) || message.channel === RUNS) throw new Error(`${id} isn't in ${SWARM}`);
+    if (!message.task && message.channel.startsWith(SWARM)) throw new Error(`${id} isn't a task in ${SWARM}`);
     await board.as(LAUNCHER).reply(message.id, said);
     return {};
   });
+}
+
+/**
+ * OrcDev's answer from the grid: reply in the thread as `orcdev`, then unblock. The browser never
+ * sees INGEST_SECRET; this route is gated like every other page write.
+ */
+export async function answerNeed(host: string | null, id: string, text: unknown): Promise<Result<{ id: string }>> {
+  if (!/^[\w.:-]{1,128}$/.test(id)) return { ok: false, problem: "not a message id" };
+  const said = typeof text === "string" ? text.trim().slice(0, PROMPT_MAX) : "";
+  if (!said) return { ok: false, problem: "nothing to say" };
+  return guarded(host, () => answerTask(team(), id, said, LAUNCHER));
 }

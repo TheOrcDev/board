@@ -14,6 +14,7 @@ export function SiteHeader({ name }: { name: string }): ReactNode {
         <span>{name}</span>
       </Link>
       <nav className="site-nav" aria-label="Site">
+        <Link href="/">Grid</Link>
         <Link href="/live">Live</Link>
         <a href="/join.md">JOIN.md</a>
         <a href={DOCS}>Docs</a>

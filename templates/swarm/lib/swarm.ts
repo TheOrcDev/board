@@ -1,13 +1,62 @@
 import type { Board, MessageView, ThreadSummaryView } from "@vercel/board";
-import { SWARM, NAME, RUNS, team } from "./board.ts";
+import { AGENTS, SWARM, NAME, RUNS, team } from "./board.ts";
+import { allHeartbeats, type Heartbeat } from "./heartbeat.ts";
+import {
+  FALLBACK_AVATAR,
+  ROSTER,
+  describeAgent,
+  monogramAvatar,
+  type AgentGroup,
+  type AgentMachine,
+  type AgentStatus,
+  type RosterAgent,
+} from "./roster.ts";
 import { ownWrite, runs, selfOf } from "./runs.ts";
 
 /** The states the board keeps a task in. */
 export const STATES = ["waiting", "ready", "claimed", "blocked", "completed", "failed", "canceled"] as const;
 export type State = (typeof STATES)[number];
 
-/** A message as the page shows it. */
-export type Line = { id: string; channel: string; re: string | null; author: string; text: string; at: string };
+/** A message as the page shows it: author and profile as the board reported them. */
+export type Line = {
+  id: string;
+  channel: string;
+  re: string | null;
+  author: string;
+  profile: string | null;
+  via: string | null;
+  kind: string | null;
+  verified: boolean;
+  text: string;
+  at: string;
+};
+
+/** A tile on the grid. Seeded agents are idle until they heartbeat or claim. */
+export type AgentTile = {
+  id: string;
+  name: string;
+  role: string | null;
+  group: AgentGroup;
+  machine: AgentMachine;
+  status: AgentStatus;
+  taskId: string | null;
+  taskTitle: string | null;
+  last: Line | null;
+  thread: string | null;
+  avatar: string;
+  fallback: string;
+  at: string | null;
+};
+
+export type Need = {
+  id: string;
+  title: string;
+  question: string;
+  agent: string | null;
+  at: string;
+};
+
+export type Counts = { ready: number; claimed: number; blocked: number; doneToday: number };
 
 /** A task: a thread whose state the board keeps, on its root's `task`. */
 export type Task = {
@@ -47,6 +96,11 @@ export type Snapshot = {
   finishedCapped: boolean;
   /** The latest messages under the swarm, newest first. */
   flow: Line[];
+  /** Heartbeats and status posts under `agents/`, newest first. */
+  agentsFlow: Line[];
+  agents: AgentTile[];
+  counts: Counts;
+  needs: Need[];
   /** The channel the deployment's runs are announced in, and its newest runs, newest first: the page shows a run by its goal, not its channel. */
   runsChannel: string;
   runs: RunView[];
@@ -85,9 +139,28 @@ const line = (message: MessageView): Line => ({
   channel: message.channel,
   re: message.re,
   author: author(message),
+  profile: message.by.profile,
+  via: message.author?.via?.name ?? null,
+  kind: message.author?.kind ?? null,
+  verified: message.author?.verified === true,
   text: message.text,
   at: message.createdAt,
 });
+
+const laterCursor = (a: string, b: string) => {
+  if (/^\d+$/.test(a) && /^\d+$/.test(b)) return BigInt(a) >= BigInt(b) ? a : b;
+  return a >= b ? a : b;
+};
+
+const postedOf = (events: { type: string; message?: MessageView | null }[]) =>
+  events.flatMap((event) => (event.type === "message.posted" && event.message && !event.message.deleted ? [event.message] : []));
+
+/** Whether a holder/author string is this profile: `finance-orc`, `orcdev/finance-orc`, or `…+finance-orc`. */
+export const isAgent = (who: string | null | undefined, id: string) => {
+  if (!who) return false;
+  const handle = who.toLowerCase();
+  return handle === id || handle.endsWith(`/${id}`) || handle.endsWith(`+${id}`) || handle.split(/[+:/]/).pop() === id;
+};
 
 /** The states a task is still in play in: the page shows every such task. */
 const OPEN = ["waiting", "ready", "claimed", "blocked"] as const;
@@ -162,30 +235,36 @@ async function tasksIn(board: Board, swarm: string, state: State, limit: number)
  */
 export async function snapshot(board: Board = team(), swarm: string = SWARM): Promise<Snapshot> {
   // The feed first: its end is where the live route listens from, so a change that lands between the
-  // reads is in the next snapshot rather than in neither.
-  const feed = await board.poll({ channel: swarm, last: 100 });
-  // What was posted among them, each as it is now. A claim's renewals are events too, so it's fewer than 100.
-  const posted = feed.events.flatMap((event) => (event.type === "message.posted" && event.message && !event.message.deleted ? [event.message] : []));
+  // reads is in the next snapshot rather than in neither. Agents' heartbeats are a second subtree.
+  const [feed, agentFeed] = await Promise.all([board.poll({ channel: swarm, last: 100 }), board.poll({ channel: AGENTS, last: 100 })]);
+  const posted = postedOf(feed.events);
+  const agentPosted = postedOf(agentFeed.events);
   const [openRead, finishedRead] = await Promise.all([
     Promise.all(OPEN.map((state) => tasksIn(board, swarm, state, OPEN_LIMIT))),
     Promise.all(FINISHED.map((state) => tasksIn(board, swarm, state, FINISHED_LIMIT))),
   ]);
   const self = await selfOf(board).catch(() => null);
   const summaries = [...openRead.flat(), ...finishedRead.flat()];
-  // A swarm with no launched runs (agents joining from JOIN.md alone) has no runs channel: that's no runs.
   const launched = await runs(board, 20).catch(() => []);
 
-  const known = handles([...posted, ...summaries.flatMap(({ message, last }) => [message, last])]);
+  const known = handles([...posted, ...agentPosted, ...summaries.flatMap(({ message, last }) => [message, last])]);
   const [open, finished] = [openRead, finishedRead].map((states) => states.map((threads) => threads.flatMap((thread) => toTask(thread, known, self))));
+  const tasks = [...open!.flat(), ...finished!.flat()];
+  const at = new Date().toISOString();
+  const flow = posted.map(line).reverse();
+  const agentsFlow = agentPosted.map(line).reverse();
   return {
     name: NAME,
     swarm,
-    cursor: feed.cursor,
-    at: new Date().toISOString(),
-    // The board lists oldest first; the page reads newest first, state by state.
-    tasks: [...open!.flat(), ...finished!.flat()],
-    finishedCapped: finished!.some((tasks) => tasks.length >= FINISHED_LIMIT),
-    flow: posted.map(line).reverse(),
+    cursor: laterCursor(feed.cursor, agentFeed.cursor),
+    at,
+    tasks,
+    finishedCapped: finished!.some((entry) => entry.length >= FINISHED_LIMIT),
+    flow,
+    agentsFlow,
+    agents: tiles(tasks, flow, agentsFlow, allHeartbeats()),
+    counts: countsOf(tasks, at),
+    needs: needsOf(tasks),
     runsChannel: RUNS,
     runs: launched.map((run) => ({
       slug: run.slug,
@@ -210,8 +289,111 @@ export async function snapshot(board: Board = team(), swarm: string = SWARM): Pr
   };
 }
 
-/** How old a snapshot every viewer shares may be: a snapshot is about nine board reads, and the board takes 600 a minute from this project, agents included. */
-export const SHARED_MS = 5_000;
+function countsOf(tasks: Task[], at: string): Counts {
+  const day = at.slice(0, 10);
+  return {
+    ready: tasks.filter((task) => task.state === "ready").length,
+    claimed: tasks.filter((task) => task.state === "claimed").length,
+    blocked: tasks.filter((task) => task.state === "blocked").length,
+    doneToday: tasks.filter((task) => task.state === "completed" && (task.last?.at ?? task.createdAt).slice(0, 10) === day).length,
+  };
+}
+
+function needsOf(tasks: Task[]): Need[] {
+  return tasks
+    .filter((task) => task.state === "blocked")
+    .map((task) => ({
+      id: task.id,
+      title: task.title,
+      question: task.note || "Waiting on OrcDev.",
+      agent: task.holder ?? task.last?.profile ?? task.last?.author ?? null,
+      at: task.last?.at ?? task.createdAt,
+    }));
+}
+
+function profileOfLine(entry: Line): string | null {
+  if (entry.profile) return entry.profile.toLowerCase();
+  const fromHandle = entry.author.split("/").pop();
+  return fromHandle && fromHandle !== entry.author ? fromHandle.toLowerCase() : null;
+}
+
+function latestByAgent(flow: Line[], agentsFlow: Line[], id: string): Line | null {
+  for (const entry of agentsFlow) if (isAgent(entry.author, id) || entry.profile === id) return entry;
+  for (const entry of flow) if (isAgent(entry.author, id) || entry.profile === id) return entry;
+  return null;
+}
+
+function tiles(tasks: Task[], flow: Line[], agentsFlow: Line[], live: Heartbeat[]): AgentTile[] {
+  const byId = new Map<string, RosterAgent>();
+  for (const agent of ROSTER) byId.set(agent.id, agent);
+  for (const hb of live) byId.set(hb.agent, describeAgent(hb.agent, hb.group, hb.machine));
+  for (const message of agentsFlow) {
+    const id = profileOfLine(message) ?? (message.channel.startsWith(AGENTS) ? message.channel.slice(AGENTS.length) : null);
+    if (id && !byId.has(id)) byId.set(id, describeAgent(id));
+  }
+  for (const task of tasks) {
+    const id = task.last?.profile ?? (task.holder ? task.holder.split("/").pop() : null);
+    if (id && !byId.has(id) && (id.startsWith("claude-") || id.startsWith("codex-") || id.startsWith("agent-"))) {
+      byId.set(id, describeAgent(id));
+    }
+  }
+
+  const claimed = tasks.filter((task) => task.state === "claimed");
+  const blocked = tasks.filter((task) => task.state === "blocked");
+  const liveBy = new Map(live.map((hb) => [hb.agent, hb]));
+
+  const out: AgentTile[] = [];
+  for (const seed of byId.values()) {
+    const hb = liveBy.get(seed.id);
+    let status: AgentStatus = hb?.status ?? "idle";
+    let taskId: string | null = null;
+    let taskTitle: string | null = hb?.task ?? null;
+    const held = claimed.find((task) => isAgent(task.holder, seed.id));
+    if (held) {
+      status = "working";
+      taskId = held.id;
+      taskTitle = held.title;
+    } else {
+      const asked = blocked.find((task) => isAgent(task.holder, seed.id) || isAgent(task.last?.author, seed.id) || task.last?.profile === seed.id);
+      if (asked) {
+        status = status === "blocked" ? "blocked" : "waiting";
+        taskId = asked.id;
+        taskTitle = asked.title;
+      }
+    }
+    const last = latestByAgent(flow, agentsFlow, seed.id);
+    const heartbeatMsg = agentsFlow.find((entry) => entry.channel === `${AGENTS}${seed.id}` || (profileOfLine(entry) === seed.id && entry.channel.startsWith(AGENTS)));
+    out.push({
+      id: seed.id,
+      name: seed.name,
+      role: seed.role,
+      group: hb?.group ?? seed.group,
+      machine: hb?.machine ?? seed.machine,
+      status,
+      taskId,
+      taskTitle,
+      last,
+      thread: taskId ?? heartbeatMsg?.id ?? last?.re ?? last?.id ?? null,
+      avatar: hb?.avatar || monogramAvatar(seed),
+      fallback: FALLBACK_AVATAR(hb?.group ?? seed.group),
+      at: last?.at ?? (hb ? new Date(hb.at).toISOString() : null),
+    });
+  }
+  const order = new Map(ROSTER.map((agent, i) => [agent.id, i]));
+  const groupRank: Record<AgentGroup, number> = { grok: 0, claude: 1, codex: 2 };
+  out.sort((a, b) => {
+    const ga = groupRank[a.group] - groupRank[b.group];
+    if (ga) return ga;
+    const ia = order.get(a.id) ?? 1000;
+    const ib = order.get(b.id) ?? 1000;
+    if (ia !== ib) return ia - ib;
+    return a.name.localeCompare(b.name);
+  });
+  return out;
+}
+
+/** How old a snapshot every viewer shares may be: about a second, so the grid moves with the feed. */
+export const SHARED_MS = 1_000;
 
 let shared: { at: number; value: Promise<Snapshot> } | undefined;
 
@@ -234,6 +416,6 @@ export function sharedSnapshot(maxAgeMs = SHARED_MS): Promise<Snapshot> {
 /** One task's thread: its brief, its labels, and its work log. Only a thread under the swarm. */
 export async function history(id: string): Promise<{ root: Line; labels: Record<string, string>; replies: Line[] }> {
   const { message, replies } = await team().thread(id);
-  if (!message.channel.startsWith(SWARM)) throw new Error(`${id} isn't in ${SWARM}`);
+  if (!message.channel.startsWith(SWARM) && !message.channel.startsWith(AGENTS)) throw new Error(`${id} isn't in ${SWARM}`);
   return { root: line(message), labels: message.labels, replies: replies.map(line) };
 }

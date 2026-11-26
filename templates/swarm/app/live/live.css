@@ -1,9 +1,36 @@
-/* The live view: a dense dashboard in grayscale, dark by default, light when the system asks. Color
-   is kept for task states. Everything is scoped to .live, so the launcher's styles and these never meet. */
+/* OrcDev grid: dark, large type, high contrast at 1080p. Color is for status only. */
+@keyframes needs-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--held) 30%, transparent), 0 0 18px color-mix(in oklab, var(--held) 12%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--held) 70%, transparent), 0 0 36px color-mix(in oklab, var(--held) 28%, transparent);
+  }
+}
+
+@keyframes tile-flash {
+  from {
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--working) 50%, transparent), 0 0 24px color-mix(in oklab, var(--working) 20%, transparent);
+  }
+  to {
+    box-shadow: none;
+  }
+}
+
 .live {
+  --ready: #3ee0a0;
+  --working: #5aa8ff;
+  --held: #ffc14a;
+  --bad: #ff6b5c;
+  --idle: #6d7380;
+  --rate: #c084fc;
+  --gold: #f0c674;
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  font-size: 0.93rem;
-  line-height: 1.5;
+  font-size: 1.05rem;
+  line-height: 1.45;
+  color: var(--ink);
+  min-height: calc(100dvh - var(--header));
 
   h1,
   h2,
@@ -21,16 +48,12 @@
   code,
   time,
   .who,
-  .ch,
   .chip,
-  .counts,
-  .state {
+  .pill,
+  .machine,
+  .kicker,
+  .count b {
     font-family: var(--font-geist-mono), ui-monospace, monospace;
-  }
-
-  code,
-  .who {
-    color: var(--ink);
   }
 
   button {
@@ -43,13 +66,11 @@
   }
 
   button:focus-visible,
-  a:focus-visible {
+  a:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible {
     outline: 2px solid var(--working);
-    outline-offset: -2px;
-  }
-
-  a {
-    color: var(--ink);
+    outline-offset: 2px;
   }
 
   .faint {
@@ -61,52 +82,64 @@
   }
 
   .pad {
-    padding: 0.5rem 0.75rem;
+    padding: 0.75rem 1rem;
   }
 
-  /* One header bar and three panes that scroll on their own. */
   .shell {
     display: grid;
-    grid-template: auto minmax(0, 1fr) / 16rem minmax(0, 1fr) minmax(20rem, 30rem);
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.75rem;
-    height: calc(100dvh - var(--header));
-    min-height: 30rem;
-    padding: 0.75rem;
+    padding: 0.85rem 1.2rem 1rem;
+    min-height: 100dvh;
   }
 
   header {
     grid-column: 1 / -1;
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 0.25rem 1.25rem;
+    align-items: flex-end;
+    gap: 0.75rem 1.5rem;
   }
 
-  h1 {
+  .brand-block h1 {
     color: var(--bright);
-    font-size: 1rem;
+    font-size: clamp(1.7rem, 2.6vw, 2.35rem);
+    font-weight: 650;
+    letter-spacing: -0.04em;
+    line-height: 1.05;
+  }
+
+  .kicker {
+    color: var(--gold);
+    font-size: 0.75rem;
     font-weight: 600;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
   }
 
   .state {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.45rem;
+    margin-left: auto;
+    color: var(--muted);
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-size: 0.9rem;
   }
 
   .state i,
-  h3 i,
-  i[data-phase],
+  .face i,
   .state-chip i {
-    width: 0.5rem;
-    height: 0.5rem;
+    width: 0.55rem;
+    height: 0.55rem;
     border-radius: 50%;
-    background: var(--faint);
+    background: var(--idle);
     flex: none;
   }
 
   .state[data-live="live"] i {
     background: var(--ready);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--ready) 25%, transparent);
   }
 
   .state[data-live="down"] {
@@ -117,48 +150,373 @@
     background: var(--bad);
   }
 
-  .counts b {
-    color: var(--ink);
-    font-weight: 600;
+  .header-actions {
+    display: flex;
+    gap: 0.5rem;
   }
 
-  .counts b.bad {
-    color: var(--bad);
-  }
-
-  .head button {
-    padding: 0.25rem 0.75rem;
+  .ghost {
+    padding: 0.35rem 0.8rem;
     border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--shade);
+    border-radius: 999px;
     color: var(--ink);
+    text-decoration: none;
   }
 
-  .head button:hover {
-    border-color: var(--faint);
-  }
-
-  .pane {
-    min-height: 0;
-    overflow-y: auto;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-  }
-
-  h2 {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid var(--line);
-    background: var(--bg);
+  .ghost[aria-pressed="true"],
+  .ghost:hover {
+    border-color: var(--gold);
     color: var(--bright);
-    font-size: 1rem;
-    font-weight: 600;
   }
 
-  nav h2:not(:first-child) {
-    border-top: 1px solid var(--line);
+  .counts {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
+  .count {
+    padding: 0.7rem 1.05rem 0.65rem;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: color-mix(in oklab, var(--shade) 80%, transparent);
+  }
+
+  .count b {
+    display: block;
+    color: var(--bright);
+    font-size: clamp(2.1rem, 4.2vw, 3.1rem);
+    font-weight: 700;
+    letter-spacing: -0.06em;
+    line-height: 1;
+  }
+
+  .count span {
+    color: var(--muted);
+    font-size: 0.95rem;
+    letter-spacing: 0.04em;
+    text-transform: lowercase;
+  }
+
+  .count[data-tone="ready"] b {
+    color: var(--ready);
+  }
+
+  .count[data-tone="working"] b {
+    color: var(--working);
+  }
+
+  .count[data-tone="held"] b {
+    color: var(--held);
+  }
+
+  .needs {
+    grid-column: 1 / -1;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: #101114;
+    overflow: hidden;
+  }
+
+  .needs[data-lit="yes"] {
+    border-color: color-mix(in oklab, var(--held) 65%, var(--line));
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--held) 35%, transparent), 0 0 28px color-mix(in oklab, var(--held) 18%, transparent);
+    animation: needs-pulse 2.4s ease-in-out infinite;
+  }
+
+  .needs h2,
+  .hub h2,
+  .log h2,
+  .panel h2 {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.55rem 1rem;
+    border-bottom: 1px solid var(--line);
+    color: var(--bright);
+    font-size: 1.08rem;
+    font-weight: 650;
+  }
+
+  .needs[data-lit="yes"] h2 {
+    color: var(--held);
+  }
+
+  .need-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+    gap: 0.6rem;
+    padding: 0.7rem;
+  }
+
+  .need-cards li {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid color-mix(in oklab, var(--held) 40%, var(--line));
+    border-radius: 12px;
+    background: color-mix(in oklab, var(--held) 8%, #0c0d10);
+  }
+
+  .need-head {
+    display: grid;
+    gap: 0.15rem;
+    width: 100%;
+  }
+
+  .need-head strong {
+    color: var(--bright);
+    font-size: 1.05rem;
+  }
+
+  .question {
+    color: var(--ink);
+    font-size: 1.05rem;
+    white-space: pre-wrap;
+  }
+
+  .answer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .answer input,
+  .composer textarea {
+    flex: 1;
+    min-width: 0;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #0a0b0d;
+    color: var(--bright);
+    font: inherit;
+  }
+
+  .answer button,
+  .composer button {
+    padding: 0.5rem 0.9rem;
+    border-radius: 8px;
+    background: var(--held);
+    color: #1a1204;
+    font-weight: 700;
+  }
+
+  .answer button:disabled,
+  .composer button:disabled {
+    opacity: 0.4;
+  }
+
+  .board {
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .hub h2 {
+    padding-left: 0.1rem;
+    padding-right: 0.1rem;
+    border-bottom: 0;
+  }
+
+  .hub h2 span:first-child {
+    letter-spacing: -0.03em;
+  }
+
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(15.6rem, 1fr));
+    gap: 0.5rem;
+    padding: 0;
+  }
+
+  .tile {
+    display: grid;
+    grid-template-columns: 3.1rem minmax(0, 1fr);
+    gap: 0.6rem;
+    width: 100%;
+    min-height: 5.8rem;
+    padding: 0.6rem 0.65rem;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #101114;
+    transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+  }
+
+  .tile:hover,
+  .tile[aria-pressed="true"] {
+    border-color: #3a3d46;
+    transform: translateY(-1px);
+  }
+
+  .tile[data-flash="yes"] {
+    animation: tile-flash 0.8s ease;
+  }
+
+  .face {
+    position: relative;
+  }
+
+  .face img {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 14px;
+    object-fit: cover;
+    background: #1a1c22;
+  }
+
+  .face i {
+    position: absolute;
+    right: -0.1rem;
+    bottom: 0.15rem;
+    width: 0.7rem;
+    height: 0.7rem;
+    border: 2px solid #101114;
+  }
+
+  .meta {
+    display: grid;
+    align-content: start;
+    gap: 0.18rem;
+    min-width: 0;
+  }
+
+  .name {
+    color: var(--bright);
+    font-size: 1.05rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  .machine,
+  .pill,
+  .chip {
+    padding: 0.05rem 0.4rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    text-transform: lowercase;
+  }
+
+  .pill[data-status="working"],
+  i[data-state="claimed"] {
+    color: var(--working);
+    border-color: color-mix(in oklab, var(--working) 50%, var(--line));
+  }
+
+  .pill[data-status="waiting"],
+  i[data-state="blocked"] {
+    color: var(--held);
+    border-color: color-mix(in oklab, var(--held) 50%, var(--line));
+  }
+
+  .pill[data-status="blocked"],
+  i[data-state="failed"] {
+    color: var(--bad);
+    border-color: color-mix(in oklab, var(--bad) 50%, var(--line));
+  }
+
+  .pill[data-status="idle"] {
+    color: var(--idle);
+  }
+
+  .pill[data-status="rate-limited"] {
+    color: var(--rate);
+  }
+
+  i[data-status="working"],
+  i[data-status="waiting"],
+  i[data-status="blocked"],
+  i[data-status="idle"],
+  i[data-status="rate-limited"] {
+    color: transparent;
+  }
+
+  i[data-status="working"] {
+    background: var(--working);
+  }
+
+  i[data-status="waiting"] {
+    background: var(--held);
+  }
+
+  i[data-status="blocked"] {
+    background: var(--bad);
+  }
+
+  i[data-status="idle"] {
+    background: var(--idle);
+  }
+
+  i[data-status="rate-limited"] {
+    background: var(--rate);
+  }
+
+  .task,
+  .last {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.88rem;
+  }
+
+  .task {
+    color: var(--ink);
+  }
+
+  .last {
+    color: var(--faint);
+  }
+
+  .log,
+  .panel {
+    min-height: 0;
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #101114;
+  }
+
+  .log {
+    display: none;
+  }
+
+  .shell[data-log="open"]:not([data-panel="open"]) .log,
+  .shell[data-panel="open"] .panel {
+    position: fixed;
+    top: 0.85rem;
+    right: 0.85rem;
+    bottom: 0.85rem;
+    width: min(30rem, 36vw);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    max-height: none;
+    box-shadow: -20px 0 48px #000a;
+  }
+
+  .shell[data-panel="open"] .log {
+    display: none;
+  }
+
+  .panel {
+    display: none;
+  }
+
+  .shell[data-panel="closed"] .panel {
+    display: none;
   }
 
   .head {
@@ -166,320 +524,67 @@
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
-    padding-block: 0.3rem;
   }
 
-  h3 {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.6rem 0.75rem 0.2rem;
-    color: var(--ink);
-    font-size: 1rem;
-    font-weight: 600;
-  }
-
-  i[data-phase] {
-    display: inline-block;
-    margin-right: 0.3rem;
-    vertical-align: middle;
-  }
-
-  i[data-phase="running"],
-  i[data-phase="preparing"] {
-    background: var(--working);
-  }
-
-  i[data-phase="done"] {
-    background: var(--ready);
-  }
-
-  i[data-phase="failed"] {
-    background: var(--bad);
-  }
-
-  /* A run in the sidebar: its goal, then where it stands, on two lines. */
-  nav button.run {
-    flex-direction: column;
-    align-items: stretch;
-    justify-content: center;
-    gap: 0;
-    height: auto;
-    padding-block: 0.35rem;
-    line-height: 1.35;
-  }
-
-  nav button.run .text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .run-meta {
-    font-size: 0.85em;
-  }
-
-  /* Writing to the board from the page. */
-  .composer {
-    display: grid;
-    gap: 0.4rem;
-    margin-top: 0.5rem;
-  }
-
-  .composer textarea {
-    width: 100%;
-    min-height: 3.2rem;
-    padding: 0.5rem 0.6rem;
+  .head button {
+    padding: 0.25rem 0.75rem;
     border: 1px solid var(--line);
-    border-radius: 4px;
-    background: transparent;
-    color: var(--ink);
-    font: inherit;
-    resize: vertical;
+    border-radius: 8px;
   }
 
-  .composer textarea:focus {
-    border-color: var(--faint);
-    outline: none;
-  }
-
-  .composer-foot {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    font-size: 0.85em;
-  }
-
-  .composer button {
-    padding: 0.2rem 0.75rem;
-    border-radius: 4px;
-    background: var(--bright);
-    color: var(--bg);
-    font-weight: 600;
-  }
-
-  .composer button:disabled {
-    opacity: 0.4;
-  }
-
-  /* What a run came to. */
-  .results {
-    display: grid;
-    gap: 0.4rem;
-    margin-top: 0.6rem;
-    padding-top: 0.6rem;
-    border-top: 1px solid var(--line);
-  }
-
-  .results h3 {
-    padding: 0;
-  }
-
-  .results .headline {
-    color: var(--bright);
-  }
-
-  .results .prs {
+  .rows button {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.4rem 0.9rem;
-  }
-
-  .results a {
-    text-decoration: underline;
-  }
-
-  .results ul {
-    display: grid;
-    gap: 0.15rem;
-  }
-
-  .results ul button {
-    display: flex;
     align-items: baseline;
-    gap: 0.55rem;
+    gap: 0.45rem 0.7rem;
     width: 100%;
-    padding: 0.3rem 0;
-    text-align: left;
-  }
-
-  .results .what {
-    display: grid;
-    min-width: 0;
-  }
-
-  .results .what .text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--ink);
-  }
-
-  .results ul i {
-    display: inline-block;
-    width: 0.5rem;
-    height: 0.5rem;
-    border-radius: 50%;
-    background: var(--faint);
-    flex: none;
-  }
-
-  .results i[data-outcome="pr"],
-  .results i[data-outcome="done"] {
-    background: var(--ready);
-  }
-
-  .results i[data-outcome="failed"] {
-    background: var(--bad);
-  }
-
-  .results .report {
-    padding: 0.5rem 0.6rem;
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    text-align: left;
-    white-space: pre-wrap;
-  }
-
-  /* The selected run, above its flow. */
-  .runbar {
-    display: grid;
-    gap: 0.3rem;
-    padding: 0.75rem;
+    padding: 0.45rem 1rem;
     border-bottom: 1px solid var(--line);
   }
 
-  .runbar .goal {
-    color: var(--bright);
-    font-weight: 600;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .runbar .stop {
-    margin-left: 1rem;
-    padding: 0 0.6rem;
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    color: var(--bad);
-  }
-
-  .runbar .stop:hover {
-    border-color: var(--bad);
-  }
-
-  i[data-state="working"] {
-    background: var(--working);
-  }
-
-  i[data-state="ready"] {
-    background: var(--ready);
-  }
-
-  i[data-state="held"] {
-    background: var(--review);
-  }
-
-  i[data-state="failed"] {
-    background: var(--bad);
-  }
-
-  i[data-state="stalled"] {
-    background: var(--bad);
-  }
-
-  /* Rows are one line each, on a fixed height, so a list reads like a table. */
-  nav button,
-  .rows button,
-  .agent {
-    display: flex;
-    align-items: baseline;
-    gap: 0.6rem;
-    width: 100%;
-    height: 1.9rem;
-    padding: 0 0.75rem;
-    line-height: 1.9rem;
-    white-space: nowrap;
-  }
-
-  nav button,
-  .agent {
-    justify-content: space-between;
-  }
-
-  nav button:hover,
-  .rows button:hover,
-  nav button[aria-pressed="true"] {
+  .rows button:hover {
     background: var(--shade);
-  }
-
-  nav button[aria-pressed="true"] {
-    color: var(--bright);
-  }
-
-  .agent .who,
-  nav button span:first-child,
-  .text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .text {
-    flex: 1 1 auto;
-    min-width: 0;
-    color: var(--ink);
   }
 
   .rows time {
     flex: none;
-    width: 2.2rem;
+    width: 2.4rem;
     color: var(--faint);
   }
 
-  .rows .ch {
-    flex: none;
-    width: 5.5rem;
+  .text {
+    flex: 1 1 12rem;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ink);
   }
 
-  .rows .who {
-    flex: none;
-    max-width: 11rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* A row's chip keeps to its share: a long one is cut, and the title beside it stays. */
-  .chip {
-    flex: none;
-    max-width: 45%;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .chip[data-verified="yes"] {
+    color: var(--ready);
+    border-color: color-mix(in oklab, var(--ready) 40%, var(--line));
   }
 
   .thread {
-    padding: 0.75rem;
+    padding: 0.9rem 1rem 1.1rem;
   }
 
   .thread h3 {
     padding: 1rem 0 0.4rem;
+    color: var(--ink);
   }
 
   .note {
-    margin-bottom: 12px;
+    margin-bottom: 0.75rem;
     color: var(--ink);
     white-space: pre-wrap;
-    overflow-wrap: anywhere;
   }
 
   .chips {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 0.3rem 0.75rem;
+    gap: 0.35rem 0.7rem;
     margin-bottom: 0.75rem;
   }
 
@@ -487,16 +592,22 @@
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    color: var(--ink);
   }
 
   article {
-    padding: 0.5rem 0;
+    padding: 0.55rem 0;
     border-top: 1px solid var(--line);
   }
 
   article:first-of-type {
     border-top: 0;
+  }
+
+  .by {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.6rem;
+    align-items: baseline;
   }
 
   .by time {
@@ -509,6 +620,19 @@
     overflow-wrap: anywhere;
   }
 
+  .composer {
+    display: grid;
+    gap: 0.4rem;
+    margin-top: 0.75rem;
+  }
+
+  .composer-foot {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    font-size: 0.85em;
+  }
+
   .lost {
     max-width: 40rem;
     margin: 0 auto;
@@ -519,15 +643,34 @@
     margin-top: 0.75rem;
   }
 
-  /* A phone gets the same three panes, stacked, with the page scrolling. */
-  @media (max-width: 60rem) {
-    .shell {
-      grid-template: auto / minmax(0, 1fr);
-      height: auto;
+  @media (max-width: 70rem) {
+    .shell,
+    .shell[data-panel="open"],
+    .shell[data-log="open"] {
+      grid-template-columns: minmax(0, 1fr);
     }
 
-    .pane {
-      max-height: 70dvh;
+    .shell[data-log="open"]:not([data-panel="open"]) .log,
+    .shell[data-panel="open"] .panel {
+      width: auto;
+      left: 0.75rem;
+      right: 0.75rem;
+      top: auto;
+      height: min(70dvh, 36rem);
+    }
+
+    .counts {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 40rem) {
+    .counts {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .count b {
+      font-size: 2.2rem;
     }
   }
 }

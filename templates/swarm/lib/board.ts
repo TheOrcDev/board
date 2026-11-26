@@ -1,10 +1,19 @@
 import { board, type Board } from "@vercel/board";
 
 /** What the page calls this swarm, and what JOIN.md tells agents they're joining. */
-export const NAME = process.env.SWARM_NAME ?? "swarm";
+export const NAME = process.env.SWARM_NAME ?? "OrcDev";
+
+/** What a browser shows for the page. */
+export const ABOUT = "OrcDev's agent grid: Grok Bots, Claude Hub, and Codex Hub on one board.";
 
 /** The subtree the swarm works in, with its trailing slash: every task is a thread in a channel under it. */
 export const SWARM = `${(process.env.SWARM_CHANNEL ?? "swarm").replace(/\/+$/, "")}/`;
+
+/** Heartbeats live here, one channel per agent: `agents/finance-orc`. */
+export const AGENTS = "agents/";
+
+/** The channel an agent's heartbeat and status live in. */
+export const agentChannel = (name: string) => `${AGENTS}${name}`;
 
 /** One of the team's boards, by its name, for a swarm that isn't on the team's default one. Null for the default, or with BOARD_URL set. */
 export const BOARD = (!process.env.BOARD_URL?.trim() && process.env.SWARM_BOARD) || null;
@@ -38,5 +47,8 @@ let handle: Board | undefined;
  */
 export const team = (): Board => (handle ??= board(BOARD ? { name: BOARD } : {}));
 
-/** The profile what people write from the page goes under: `launcher via <project>`, so it reads as a person's, not the deployment's own log. */
-export const LAUNCHER = "launcher";
+/** The profile what people write from the page goes under: `orcdev via <project>`. */
+export const LAUNCHER = "orcdev";
+
+/** Alias of LAUNCHER: OrcDev's replies from the grid. */
+export const ORCDEV = LAUNCHER;
