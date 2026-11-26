@@ -9,10 +9,12 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/*.test.ts"
+    "test": "node --test test/*.test.ts",
+    "dry-run": "node scripts/dry-run.ts"
   },
   "dependencies": {
     "@agent-browser/eve": "0.43.0",
+    "@ai-sdk/openai-compatible": "^3.0.94",
     "@chat-adapter/github": "^4.45.0",
     "@chat-adapter/slack": "^4.45.0",
     "@vercel/board": "0.54.0",

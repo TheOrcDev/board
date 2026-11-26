@@ -1,9 +1,13 @@
 # factory
 
-An agent on your team's board that takes bugs, features, and questions to pull requests. Deploy
-it, connect GitHub and Slack, and talk to it where your team already works.
+An agent on your team's board that takes bugs, features, and questions to pull requests. This
+copy is wired for [Orcanva](https://github.com/TheOrcDev/orcanva) (`TheOrcDev/orcanva`, branch
+`main`) and [The Grid](https://thegrid.ai) (`text-prime`). Deploy it, connect GitHub, and talk to
+it where your team already works.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fboard%2Ftree%2Fmain%2Ftemplates%2Ffactory&project-name=factory&repository-name=factory)
+Filming the Orcanva issue-to-PR demo: [DEMO.md](./DEMO.md).
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FTheOrcDev%2Fboard%2Ftree%2Fmain%2Ftemplates%2Ffactory&project-name=factory&repository-name=factory)
 
 ![A running factory's page: the week in its channels, its pull requests, and the repos it works on](./screenshot.png)
 
@@ -55,8 +59,8 @@ Other threads get what they need:
 
 ## Deploy it
 
-You need a Vercel team, a GitHub account or organization where you can install an app, and AI
-Gateway credits for the agent's model. Slack is optional.
+You need a Vercel team, a GitHub account or organization where you can install an app, and a
+Grid Consumption API key (`GRID_API_KEY`) for the agent's model. Slack is optional.
 
 1. **Click Deploy.** It makes your copy of this repo and a Vercel project.
 2. **Open the deployment.** Its page is the launcher: four steps, each checked against the
@@ -64,8 +68,8 @@ Gateway credits for the agent's model. Slack is optional.
 
    | Step | What it asks for |
    | --- | --- |
-   | Vercel | Deployment Protection on, the team's board opened once, and AI Gateway credits |
-   | GitHub | A Vercel Connect connector, with its app on the repos the factory works on, this one included |
+   | Vercel | Deployment Protection on, the team's board opened once, and `GRID_API_KEY` |
+   | GitHub | A Vercel Connect connector, with its app on the repos the factory works on, Orcanva included |
    | Slack (optional) | A Vercel Connect connector, with its app in the channel where the factory updates itself |
    | Try it | A first task, and a reply from the agent |
 
@@ -83,6 +87,63 @@ via the project (`ada via factory`). Or open it from your terminal, as you:
 
 ```bash
 npx @vercel/board inspect --scope <your-team>
+```
+
+## One-time setup (this checkout)
+
+Work from `templates/factory`. Do not create the Vercel project, Connect connector, or Grid key
+from a script: run these yourself.
+
+```bash
+cd templates/factory
+# eve 0.84.1 needs Node 24. On Vercel: Settings → General → Node.js Version 24.x
+node -v   # v24.x
+pnpm install
+cp .env.example .env.local
+
+# Link this directory as the Vercel project. Root Directory stays this folder.
+vercel login
+vercel link --yes --project factory --scope <your-team>
+
+# Open the team's board once (creates it if the team has none).
+npx @vercel/board inspect --scope <your-team>
+
+# GitHub connector, webhooks to this project's board route.
+vercel connect create github --name factory --triggers --trigger-project factory --trigger-path /api/board/webhooks/github --scope <your-team>
+# Then install its GitHub app on:
+#   TheOrcDev/orcanva
+#   this factory's own repo (the Vercel project's git repo), with contents:write
+
+# The Grid. Sign up at https://thegrid.ai, then create a Consumption API key at
+# https://app.thegrid.ai/profile/api-keys (shown once). Paste it when env add asks.
+# Do not commit the value. Leave GRID_MODEL=text-prime unless tool calls struggle.
+vercel env add GRID_API_KEY
+# Production, Preview, Development: paste the key in each, or add it once for all.
+# Optional: vercel env add GRID_MODEL   →  text-prime
+
+vercel env pull
+```
+
+Dashboard, once, for the same project:
+
+1. **Settings → Deployment Protection:** Vercel Authentication on for all deployments.
+2. **Settings → Environment Variables:** `GRID_API_KEY` present. `GRID_MODEL` optional
+   (`text-prime` default; `agent-prime` if tool calls struggle).
+3. **Settings → Git:** repo is this checkout, Root Directory `templates/factory`, production
+   branch `main`.
+4. Redeploy after the env vars land.
+
+Connectors and board channels follow the Vercel project name. For a project named `factory`:
+`github/factory`, `project-factory`, `project-factory/orcanva`, `project-factory/rsi`.
+
+To check the board flow without a Grid key or Connect:
+
+```bash
+pnpm dry-run
+# Or, to watch it in the inspector:
+npx @vercel/board serve
+BOARD_URL=http://127.0.0.1:4100/api/board pnpm dry-run
+npx @vercel/board inspect --url http://127.0.0.1:4100/api/board
 ```
 
 ## Names
@@ -108,9 +169,10 @@ the repo will show and what's left to do. Once the repo is in, it looks for a wa
 changes there by using what the repo builds, and says what it would need from you.
 
 Each repo gets a board channel of its own, `project-<name>/<repo>`, and a Slack channel that
-mirrors it: the one you name, or `#<project>-<repo>`. This repo's own pull requests and issues
-come into `project-<name>/rsi`, where people talk with the agent about the factory itself. What's
-about no one repo goes in `project-<name>`.
+mirrors it: the one you name, or `#<project>-<repo>`. This copy already maps `TheOrcDev/orcanva`
+to `project-<name>/orcanva`. This repo's own pull requests and issues come into
+`project-<name>/rsi`, where people talk with the agent about the factory itself. What's about no
+one repo goes in `project-<name>`.
 
 ## How it works with your team
 
@@ -170,7 +232,7 @@ through its watcher, so another agent swaps in by giving the board a watcher of 
 
 ```bash
 pnpm install
-vercel link && vercel env pull   # the project's OIDC token, for the board, AI Gateway, and Connect
+vercel link && vercel env pull   # the project's OIDC token, for the board, Connect, and GRID_API_KEY
 pnpm dev
 ```
 
@@ -181,6 +243,7 @@ team, so nothing you try answers production's threads. Open it with
 ```bash
 pnpm typecheck
 pnpm test
+pnpm dry-run
 ```
 
 ## Updates

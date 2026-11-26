@@ -210,7 +210,7 @@ export async function setup(deps: Deps): Promise<Setup> {
   return { open: false, steps: [vercel.step, github, slack, tryIt], found };
 }
 
-/** Protected, on the team's board, with AI Gateway. `me` is this project on the board, or null when it can't use it. */
+/** Protected, on the team's board, with a Grid API key. `me` is this project on the board, or null when it can't use it. */
 async function vercelStep(deps: Deps, local: boolean, project: Project): Promise<{ step: Step; me: Me | null }> {
   const links = dashboard(project);
   const signedOut = local && !deps.env.VERCEL_OIDC_TOKEN;
@@ -224,7 +224,7 @@ async function vercelStep(deps: Deps, local: boolean, project: Project): Promise
   }
 
   // Signed out on your machine: said once, here, whatever else works. The board can answer through
-  // your own login while Connect and AI Gateway still wait on the project's token.
+  // your own login while Connect and the Grid key still wait on the project's token.
   if (signedOut) tasks.push(signIn());
 
   // The board is the team's, in Vercel's API. A team has one once someone on it has opened it.
@@ -242,13 +242,19 @@ async function vercelStep(deps: Deps, local: boolean, project: Project): Promise
     if (!syncs) tasks.push(todo("Let this project sync on the board", { hint: "Its grants were narrowed. Whoever manages the board can widen them." }));
   }
 
-  const balance = await deps.credits().catch((error: unknown) => error);
-  // A prepaid team's balance runs down to zero; a team billed for usage shows it as negative.
-  const CREDITS = "Add AI Gateway credits";
-  if (typeof balance === "number" && balance !== 0) tasks.push(done(CREDITS));
-  else if (balance === 0) tasks.push(todo(CREDITS, { link: { href: `${links.team}/~/ai`, label: "Open AI Gateway" } }));
-  else if (signedOut) tasks.push(todo(CREDITS));
-  else tasks.push(todo("Couldn't reach AI Gateway", { hint: message(balance) }));
+  // This copy's agent calls The Grid, not AI Gateway. A non-empty GRID_API_KEY in the project's env
+  // is what it needs. Never print the key.
+  const GRID_KEY = "Add GRID_API_KEY";
+  if (deps.env.GRID_API_KEY) tasks.push(done(GRID_KEY));
+  else if (signedOut) tasks.push(todo(GRID_KEY));
+  else {
+    tasks.push(
+      todo(GRID_KEY, {
+        hint: "Create a Consumption API key, then add it to this project's env. Do not paste the key in a thread.",
+        link: { href: "https://app.thegrid.ai/profile/api-keys", label: "Open The Grid API keys" },
+      }),
+    );
+  }
 
   return { step: step("vercel", tasks), me: access instanceof Error ? null : access };
 }

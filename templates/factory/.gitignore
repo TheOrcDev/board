@@ -3,6 +3,8 @@ node_modules
 .eve
 .output
 .vercel
+.board
 .env*
+!.env.example
 next-env.d.ts
 *.tsbuildinfo

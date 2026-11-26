@@ -12,7 +12,8 @@ const own = ownRepo();
 export const repoChannels: Record<string, string> = {
   // This factory's own repo: where it changes itself.
   ...(own ? { [own]: channel("rsi") } : {}),
-  // "acme/web": channel("web"),
+  // Orcanva, the demo target: issues and PRs land in project-<name>/orcanva.
+  "TheOrcDev/orcanva": channel("orcanva"),
 };
 
 /** Each Slack channel (a name or an ID) and the board channel it mirrors, both ways. */
@@ -20,7 +21,8 @@ export const slackChannels: Record<string, string> = {
   // Where the factory updates itself: its own PRs and issues, and talk about how it works. Named
   // for this factory's Vercel project, #factory-rsi for one named factory.
   [slackChannel("-rsi")]: channel("rsi"),
-  // "#web": channel("web"),
+  // Optional. Uncomment after the Slack connector is in, then invite the app:
+  // [slackChannel("-orcanva")]: channel("orcanva"),
 };
 
 /**

@@ -20,6 +20,7 @@ const PRODUCTION = {
   VERCEL_PROJECT_PRODUCTION_URL: "factory.acme.dev",
   VERCEL_GIT_REPO_OWNER: "acme",
   VERCEL_GIT_REPO_SLUG: "factory",
+  GRID_API_KEY: "set",
 };
 
 type Routes = Record<string, (init?: RequestInit, url?: string) => Response>;
@@ -122,7 +123,7 @@ test("it asks for no secret to get through its own protection, and shows no bala
   assert.deepEqual(vercel!.tasks, [
     { label: "Turn on Deployment Protection", done: true },
     { label: "Open the team's board once", done: true },
-    { label: "Add AI Gateway credits", done: true },
+    { label: "Add GRID_API_KEY", done: true },
   ]);
 });
 
@@ -600,6 +601,7 @@ test("this factory's own channels.ts, whatever it has onboarded, brings every re
   assert.equal(acme.hears, "project-acme-factory/");
   // Its own repo, on a deployment from Git, comes into the channel where it changes itself.
   assert.equal(acme.repos["acme/factory"], "project-acme-factory/rsi");
+  assert.equal(acme.repos["TheOrcDev/orcanva"], "project-acme-factory/orcanva");
   assert.deepEqual(into(acme).filter((to) => !to.startsWith(acme.hears)), []);
   // The same code as the team's second factory, on a dev server: board channels of its own, none shared.
   // Nothing here says its Slack channels or connectors differ: a factory may name those itself.
@@ -802,14 +804,14 @@ test("locally, a board that answers through your own login still leaves signing 
   assert.deepEqual(commands(steps.vercel!), ["vercel link", "vercel env pull"]);
 });
 
-test("AI Gateway without credits says where to add them", async () => {
-  const { vercel } = await shown(fake({ deps: { credits: async () => 0 } }).deps);
-  assert.deepEqual(labels(todo(vercel!)), ["Add AI Gateway credits"]);
-  assert.deepEqual(links(vercel!), ["https://vercel.com/acme/~/ai"]);
+test("without GRID_API_KEY, the Vercel step says where to create one", async () => {
+  const { vercel } = await shown(fake({ env: { ...PRODUCTION, GRID_API_KEY: undefined } }).deps);
+  assert.deepEqual(labels(todo(vercel!)), ["Add GRID_API_KEY"]);
+  assert.deepEqual(links(vercel!), ["https://app.thegrid.ai/profile/api-keys"]);
 });
 
-test("a team billed for AI Gateway usage, with a negative balance, is ready", async () => {
-  const { vercel } = await shown(fake({ deps: { credits: async () => -1194239.37 } }).deps);
+test("GRID_API_KEY is enough even when AI Gateway has no credits", async () => {
+  const { vercel } = await shown(fake({ deps: { credits: async () => 0 } }).deps);
   assert.equal(isDone(vercel!), true);
 });
 
@@ -830,7 +832,7 @@ Bring it issues, threads, and questions. 3 of 3 steps done, checked on this requ
 
 - [x] Turn on Deployment Protection
 - [x] Open the team's board once
-- [x] Add AI Gateway credits
+- [x] Add GRID_API_KEY
 
 ## 2. GitHub (done)
 
