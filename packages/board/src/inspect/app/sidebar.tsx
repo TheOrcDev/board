@@ -5,15 +5,31 @@ import * as board from './board.ts'
 import { toast } from './chrome.ts'
 import { Avatar } from './message.tsx'
 import { Link, navigate, type Route } from './nav.tsx'
-import { sections, toggleStar, useStars } from './stars.ts'
-import { openTasks, type State } from './store.ts'
+import { toggleStar, useStars } from './stars.ts'
+import { boardKey, openTasks, type State } from './store.ts'
 import { ContextMenuArea, Menu, MenuItem, MenuSeparator } from './ui.tsx'
 import { boardWords, shownName } from './words.ts'
 
 // --- sidebar -------------------------------------------------------------------------
 
+/** Starred channels on top, then the rest grouped by the path before their last `/`, each list by path. */
+function channelSections(channels: ChannelView[], stars: Set<string>) {
+  const starred: ChannelView[] = []
+  const groups = new Map<string, ChannelView[]>()
+  for (const channel of channels.sort((a, b) => a.path.localeCompare(b.path))) {
+    if (stars.has(channel.path)) {
+      starred.push(channel)
+      continue
+    }
+    const at = channel.path.lastIndexOf('/')
+    const group = at === -1 ? 'channels' : channel.path.slice(0, at)
+    groups.set(group, [...(groups.get(group) ?? []), channel])
+  }
+  return { starred, groups: [...groups] }
+}
+
 function useSeen(state: State, current: Route): Record<string, number> {
-  const storage = `board.seen:${state.discovery?.url ?? location.host}`
+  const storage = `board.seen:${boardKey(state)}`
   const [seen, setSeen] = useState<Record<string, number>>(() => {
     try {
       return JSON.parse(localStorage.getItem(storage) ?? 'null') ?? {}
@@ -43,8 +59,9 @@ function useSeen(state: State, current: Route): Record<string, number> {
 
 export function Sidebar({ state, current, onCollapse }: { state: State; current: Route; onCollapse: () => void }) {
   const seen = useSeen(state, current)
-  const stars = useStars(state)
-  const { starred, groups } = useMemo(() => sections(Object.values(state.channels), stars), [state.channels, stars])
+  const thisBoard = boardKey(state)
+  const stars = useStars(thisBoard)
+  const { starred, groups } = useMemo(() => channelSections(Object.values(state.channels), stars), [state.channels, stars])
   const open = openTasks(state)
   const where = boardWords(state.discovery)
   const [adding, setAdding] = useState(false)
@@ -58,7 +75,7 @@ export function Sidebar({ state, current, onCollapse }: { state: State; current:
         key={channel.path}
         menu={
           <>
-            <MenuItem onClick={() => toggleStar(state, channel.path)}>{stars.includes(channel.path) ? 'unstar' : 'star'}</MenuItem>
+            <MenuItem onClick={() => toggleStar(thisBoard, channel.path)}>{stars.has(channel.path) ? 'unstar' : 'star'}</MenuItem>
             <MenuSeparator />
             <MenuItem onClick={() => copy(channel.path)}>copy name</MenuItem>
             <MenuItem onClick={() => copy(`vb read ${channel.path}`)}>copy vb read command</MenuItem>

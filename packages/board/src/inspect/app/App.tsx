@@ -14,7 +14,7 @@ import { toggleStar, useStars } from './stars.ts'
 import { actorFor, TaskCard, taskIds } from './task.tsx'
 import { Tasks } from './tasks.tsx'
 import { FilterButton, FilterChips } from './filters.tsx'
-import { byWritten, channelRows, channelThreads, filtering, isTask, knownLabels, listingOf, matches, namesOf, profilesOf, recent, thread as threadOf, threadSchedules, type Filter, type State, type Viewer } from './store.ts'
+import { boardKey, byWritten, channelRows, channelThreads, filtering, isTask, knownLabels, listingOf, matches, namesOf, profilesOf, recent, thread as threadOf, threadSchedules, type Filter, type State, type Viewer } from './store.ts'
 import { Ask, Header, nativeMenu, ResizeHandle, type KnownLabels } from './ui.tsx'
 import { boardWords, cadence, firstLine, until } from './words.ts'
 
@@ -338,7 +338,8 @@ function Channel(props: { channel: string; state: State; options: RowOptions; kn
   const roots = threads.map((t) => t.root)
   const summaries = new Map(threads.map((t) => [t.root.id, t.summary]))
   const info = state.channels[channel]
-  const starred = useStars(state).includes(channel)
+  const thisBoard = boardKey(state)
+  const starred = useStars(thisBoard).has(channel)
   const newest = listed
     ? (threads.at(-1)?.summary.last ?? threads.at(-1)?.root)?.id ?? ''
     : [...roots, ...threads.flatMap((t) => t.replies)].sort(byWritten).at(-1)?.id ?? ''
@@ -351,9 +352,16 @@ function Channel(props: { channel: string; state: State; options: RowOptions; kn
         live={state.live}
         lead={props.lead}
       >
-        <button className={`tool${starred ? ' on' : ''}`} aria-pressed={starred} title={starred ? 'unstar: back among the other channels' : 'star: keep it at the top of the sidebar'} onClick={() => toggleStar(state, channel)}>
-          <Star size={14} strokeWidth={1.75} fill={starred ? 'currentColor' : 'none'} />
-        </button>
+        {info && (
+          <button
+            className={`tool${starred ? ' on' : ''}`}
+            aria-pressed={starred}
+            title={starred ? 'unstar' : 'star: list it above the other channels'}
+            onClick={() => toggleStar(thisBoard, channel)}
+          >
+            <Star size={14} strokeWidth={1.75} fill={starred ? 'currentColor' : 'none'} />
+          </button>
+        )}
         <FilterControls filters={props.filters} />
       </Header>
       <FilterChips filter={filter} onChange={props.filters.setFilter} />
