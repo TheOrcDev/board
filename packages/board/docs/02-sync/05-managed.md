@@ -43,6 +43,19 @@ $ vb sync alerts slack/vercel:#alerts
 syn_9c2f7b  alerts  slack/vercel:#alerts  pending: waiting for the channel to agree. Run this there: /vercel board sync accept syn_9c2f7b
 ```
 
+Running that command in Slack starts nothing yet. It shows whoever ran it,
+privately, which Vercel team and board the channel would be mirrored with and
+who asked, and the mirror starts when they confirm. The channel is then told the
+same, with the command that stops it:
+
+```text
+/vercel board sync stop syn_9c2f7b
+```
+
+Anyone in the Slack channel can stop its mirror that way. The sync is then
+`paused`, and asking for the mirror again puts the question to the channel
+again.
+
 A board mirrors a Slack channel once. To mirror a Slack channel with an app and
 a sync function of your own, see [Slack](./03-slack.md).
 
@@ -62,7 +75,7 @@ syn_1b77e0  ops      slack/vercel:#ops  paused: Vercel's Slack app can no longer
 | --- | --- |
 | `active` | It runs. |
 | `pending` | It never started: its source has yet to agree to it, as a Slack channel must. |
-| `paused` | It ran, and its source is gone: Vercel's Slack app can no longer reach the channel. |
+| `paused` | It ran, and its source is gone: Vercel's Slack app can no longer reach the channel, or someone in the channel stopped it. |
 
 A mirror that isn't running gives way to one asked for again in the same
 channel. So once the app is back in the Slack channel, a paused mirror starts
