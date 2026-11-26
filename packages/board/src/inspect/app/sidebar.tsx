@@ -5,6 +5,7 @@ import * as board from './board.ts'
 import { toast } from './chrome.ts'
 import { Avatar } from './message.tsx'
 import { Link, navigate, type Route } from './nav.tsx'
+import { sections, toggleStar, useStars } from './stars.ts'
 import { openTasks, type State } from './store.ts'
 import { ContextMenuArea, Menu, MenuItem, MenuSeparator } from './ui.tsx'
 import { boardWords, shownName } from './words.ts'
@@ -42,19 +43,35 @@ function useSeen(state: State, current: Route): Record<string, number> {
 
 export function Sidebar({ state, current, onCollapse }: { state: State; current: Route; onCollapse: () => void }) {
   const seen = useSeen(state, current)
-  const groups = useMemo(() => {
-    const out = new Map<string, ChannelView[]>()
-    for (const channel of Object.values(state.channels).sort((a, b) => a.path.localeCompare(b.path))) {
-      const at = channel.path.lastIndexOf('/')
-      const group = at === -1 ? 'channels' : channel.path.slice(0, at)
-      out.set(group, [...(out.get(group) ?? []), channel])
-    }
-    return [...out]
-  }, [state.channels])
+  const stars = useStars(state)
+  const { starred, groups } = useMemo(() => sections(Object.values(state.channels), stars), [state.channels, stars])
   const open = openTasks(state)
   const where = boardWords(state.discovery)
   const [adding, setAdding] = useState(false)
   const copy = (text: string) => void navigator.clipboard.writeText(text).then(() => toast(`copied ${text}`))
+  const item = (channel: ChannelView, name: string) => {
+    const active = current.view === 'channel' && current.channel === channel.path
+    // Only where the board keeps a channel's last position: Vercel's API doesn't.
+    const unread = !active && (channel.lastIndex ?? 0) > (seen[channel.path] ?? Number.POSITIVE_INFINITY)
+    return (
+      <ContextMenuArea
+        key={channel.path}
+        menu={
+          <>
+            <MenuItem onClick={() => toggleStar(state, channel.path)}>{stars.includes(channel.path) ? 'unstar' : 'star'}</MenuItem>
+            <MenuSeparator />
+            <MenuItem onClick={() => copy(channel.path)}>copy name</MenuItem>
+            <MenuItem onClick={() => copy(`vb read ${channel.path}`)}>copy vb read command</MenuItem>
+          </>
+        }
+      >
+        <Link to={`/c/${channel.path}`} className={`item${unread ? ' unread' : ''}`} current={active} title={channel.path}>
+          <span className="name">#{name}</span>
+          {unread ? <i className="dot" /> : channel.threads !== undefined ? <span className="count">{channel.threads}</span> : null}
+        </Link>
+      </ContextMenuArea>
+    )
+  }
   return (
     <div className="sidebar-col">
       <div className="brand">
@@ -74,6 +91,13 @@ export function Sidebar({ state, current, onCollapse }: { state: State; current:
           <span className="name">tasks</span>
           {open !== null && open > 0 && <span className="count">{open}</span>}
         </Link>
+        {starred.length > 0 && (
+          <section>
+            <h2>starred</h2>
+            {/* Out of their groups, starred channels keep their full path. */}
+            {starred.map((channel) => item(channel, channel.path))}
+          </section>
+        )}
         <h2>
           channels
           <button className="tool" title="new channel" onClick={() => setAdding(true)}>
@@ -84,27 +108,7 @@ export function Sidebar({ state, current, onCollapse }: { state: State; current:
         {groups.map(([group, channels]) => (
           <section key={group}>
             {group !== 'channels' && <h2>{group}</h2>}
-            {channels.map((channel) => {
-              const active = current.view === 'channel' && current.channel === channel.path
-              // Only where the board keeps a channel's last position: Vercel's API doesn't.
-              const unread = !active && (channel.lastIndex ?? 0) > (seen[channel.path] ?? Number.POSITIVE_INFINITY)
-              return (
-                <ContextMenuArea
-                  key={channel.path}
-                  menu={
-                    <>
-                      <MenuItem onClick={() => copy(channel.path)}>copy name</MenuItem>
-                      <MenuItem onClick={() => copy(`vb read ${channel.path}`)}>copy vb read command</MenuItem>
-                    </>
-                  }
-                >
-                  <Link to={`/c/${channel.path}`} className={`item${unread ? ' unread' : ''}`} current={active} title={channel.path}>
-                    <span className="name">#{channel.path.slice(channel.path.lastIndexOf('/') + 1)}</span>
-                    {unread ? <i className="dot" /> : channel.threads !== undefined ? <span className="count">{channel.threads}</span> : null}
-                  </Link>
-                </ContextMenuArea>
-              )
-            })}
+            {channels.map((channel) => item(channel, channel.path.slice(channel.path.lastIndexOf('/') + 1)))}
           </section>
         ))}
       </div>

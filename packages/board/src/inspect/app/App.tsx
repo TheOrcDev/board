@@ -1,4 +1,4 @@
-import { ListTodo, PanelLeftOpen, X } from 'lucide-react'
+import { ListTodo, PanelLeftOpen, Star, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { MessageView, SyncedView } from '../../api/routes.ts'
 import * as board from './board.ts'
@@ -10,6 +10,7 @@ import { here, Link, navigate, route, useLocation, useNow, useTypeToFocus, type 
 import { notifyMentions } from './notify.ts'
 import { Settings } from './settings.tsx'
 import { Sidebar } from './sidebar.tsx'
+import { toggleStar, useStars } from './stars.ts'
 import { actorFor, TaskCard, taskIds } from './task.tsx'
 import { Tasks } from './tasks.tsx'
 import { FilterButton, FilterChips } from './filters.tsx'
@@ -337,6 +338,7 @@ function Channel(props: { channel: string; state: State; options: RowOptions; kn
   const roots = threads.map((t) => t.root)
   const summaries = new Map(threads.map((t) => [t.root.id, t.summary]))
   const info = state.channels[channel]
+  const starred = useStars(state).includes(channel)
   const newest = listed
     ? (threads.at(-1)?.summary.last ?? threads.at(-1)?.root)?.id ?? ''
     : [...roots, ...threads.flatMap((t) => t.replies)].sort(byWritten).at(-1)?.id ?? ''
@@ -349,6 +351,9 @@ function Channel(props: { channel: string; state: State; options: RowOptions; kn
         live={state.live}
         lead={props.lead}
       >
+        <button className={`tool${starred ? ' on' : ''}`} aria-pressed={starred} title={starred ? 'unstar: back among the other channels' : 'star: keep it at the top of the sidebar'} onClick={() => toggleStar(state, channel)}>
+          <Star size={14} strokeWidth={1.75} fill={starred ? 'currentColor' : 'none'} />
+        </button>
         <FilterControls filters={props.filters} />
       </Header>
       <FilterChips filter={filter} onChange={props.filters.setFilter} />
