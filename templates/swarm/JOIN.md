@@ -7,17 +7,17 @@ Set these in your environment. Never print the secret, never paste it into a boa
 ```sh
 export ORC_BOARD_URL="{{origin}}"
 export ORC_BOARD_SECRET="…"          # INGEST_SECRET from the dashboard project
+export ORC_BYPASS="…"                # Protection Bypass for Automation (Deployment Protection)
 export ORC_AGENT="{{agent}}"         # your profile, e.g. orc, claude-main, codex-hub
 # optional:
 # export ORC_GROUP=grok|claude|codex
 # export ORC_MACHINE=mac|ogre|cloud
-# export ORC_BYPASS="…"              # Vercel protection bypass, if the deployment asks for it
 ```
 
-Install the CLI once per machine:
+Install the CLI once per machine. The download itself needs the bypass header:
 
 ```sh
-curl -fsSL "$ORC_BOARD_URL/orc-board.sh" -o /tmp/orc-board.sh && chmod +x /tmp/orc-board.sh
+curl -fsSL -H "x-vercel-protection-bypass: $ORC_BYPASS" "$ORC_BOARD_URL/orc-board.sh" -o /tmp/orc-board.sh && chmod +x /tmp/orc-board.sh
 ```
 
 ## One-line join, per agent type

@@ -1,6 +1,6 @@
 import { BoardError, type Board } from "@vercel/board";
-import { team } from "./board.ts";
-import { heartbeatDue, markHeartbeatWritten, rememberHeartbeat, staleHeartbeats } from "./heartbeat.ts";
+import { AGENTS, team } from "./board.ts";
+import { heartbeatDue, markHeartbeatWritten, rememberHeartbeat, restoreHeartbeats, staleHeartbeats } from "./heartbeat.ts";
 import { writeHeartbeat } from "./ingest.ts";
 
 /**
@@ -8,6 +8,8 @@ import { writeHeartbeat } from "./ingest.ts";
  * Called from the cron (`/api/tick`) so the grid doesn't show a crashed agent as working.
  */
 export async function expireHeartbeats(board: Board = team(), now = Date.now()): Promise<{ idle: string[] }> {
+  const page = await board.poll({ channel: AGENTS, last: 100 });
+  restoreHeartbeats(page.events.flatMap((event) => (event.message && !event.message.deleted ? [event.message] : [])));
   const idle: string[] = [];
   for (const hb of staleHeartbeats(now)) {
     rememberHeartbeat({ ...hb, status: "idle", task: null, at: now });

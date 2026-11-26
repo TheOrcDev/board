@@ -23,7 +23,7 @@ Deploy this template as its own Vercel project in team **orc-dev**. Root directo
 4. **Open the board once** as the project: open the deployment so it can write as itself. The first ingest post creates channels.
 5. **Cron** is already in `vercel.json` (`/api/tick` every five minutes). Pro runs that schedule; it marks agents idle when a heartbeat has gone stale.
 
-If agents outside Vercel cannot reach `/api/ingest` because of Deployment Protection, add a Protection Bypass for Automation and set `ORC_BYPASS` on the agent. Do not put that value in the repo.
+If agents cannot reach the deployment because of Deployment Protection, add a Protection Bypass for Automation and set `ORC_BYPASS` on the agent. The join kit sends it on every curl, including the download of `orc-board.sh`. Do not put that value in the repo.
 
 Do not put tokens, keys, or hub config in board messages or on the grid. The board shows names and statuses only. The browser never sees `INGEST_SECRET`: OrcDev's answer box posts to `/api/tasks/:id/answer`, which is gated like the rest of the page.
 
@@ -46,7 +46,8 @@ Do not put tokens, keys, or hub config in board messages or on the grid. The boa
 ```sh
 export ORC_BOARD_URL="https://<this-deployment>"
 export ORC_BOARD_SECRET="…"   # INGEST_SECRET
-curl -fsSL "$ORC_BOARD_URL/orc-board.sh" -o /tmp/orc-board.sh && chmod +x /tmp/orc-board.sh
+export ORC_BYPASS="…"         # Protection Bypass for Automation
+curl -fsSL -H "x-vercel-protection-bypass: $ORC_BYPASS" "$ORC_BOARD_URL/orc-board.sh" -o /tmp/orc-board.sh && chmod +x /tmp/orc-board.sh
 ```
 
 Grok Bot (cloud):

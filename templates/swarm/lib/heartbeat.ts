@@ -1,4 +1,7 @@
-import type { AgentGroup, AgentMachine, AgentStatus } from "./roster.ts";
+import { isProfileName, parseGroup, parseMachine, parseStatus, type AgentGroup, type AgentMachine, type AgentStatus } from "./roster.ts";
+
+/** Same prefix as `AGENTS` in board.ts: heartbeat threads live at `agents/<name>`. */
+const AGENTS_PREFIX = "agents/";
 
 /** One board write per agent per minute: Vercel's board shares about 300 writes a minute with every profile. */
 export const HEARTBEAT_THROTTLE_MS = 60_000;
@@ -60,4 +63,50 @@ export function staleHeartbeats(now: number): Heartbeat[] {
 /** Tests reset the in-memory roster of live statuses. */
 export function resetHeartbeats(): void {
   store.clear();
+}
+
+type BoardHeartbeat = {
+  channel: string;
+  labels: Record<string, string>;
+  createdAt: string;
+  editedAt?: string | null;
+  version?: number;
+  by?: { profile?: string | null };
+};
+
+const agentOf = (message: BoardHeartbeat): string | null => {
+  if (message.channel.startsWith(AGENTS_PREFIX)) {
+    const id = message.channel.slice(AGENTS_PREFIX.length).split("/")[0] ?? "";
+    if (isProfileName(id)) return id.toLowerCase();
+  }
+  const profile = message.by?.profile?.trim();
+  if (profile && isProfileName(profile)) return profile.toLowerCase();
+  return null;
+};
+
+/**
+ * Fill any agent the process has not seen yet from the board's `agents/<name>` heartbeat labels.
+ * Live in-memory status wins: a throttled heartbeat this instance took is newer than the last write.
+ */
+export function restoreHeartbeats(messages: Iterable<BoardHeartbeat>): void {
+  const latest = new Map<string, { at: number; version: number; group: AgentGroup; machine: AgentMachine; status: AgentStatus; task: string | null }>();
+  for (const message of messages) {
+    if (message.labels.kind !== "heartbeat") continue;
+    const agent = agentOf(message);
+    const group = parseGroup(message.labels.group);
+    const machine = parseMachine(message.labels.machine);
+    const status = parseStatus(message.labels.status);
+    if (!agent || !group || !machine || !status) continue;
+    const at = Date.parse(message.editedAt || message.createdAt);
+    if (!Number.isFinite(at)) continue;
+    const version = message.version ?? 0;
+    const prev = latest.get(agent);
+    if (prev && (version < prev.version || (version === prev.version && at <= prev.at))) continue;
+    const task = message.labels.task?.trim() ? message.labels.task.trim().slice(0, 200) : null;
+    latest.set(agent, { at, version, group, machine, status, task });
+  }
+  for (const [agent, hb] of latest) {
+    if (store.has(agent)) continue;
+    rememberHeartbeat({ agent, group: hb.group, machine: hb.machine, status: hb.status, task: hb.task, avatar: null, at: hb.at, writtenAt: hb.at });
+  }
 }

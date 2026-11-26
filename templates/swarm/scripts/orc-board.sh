@@ -59,13 +59,12 @@ call() {
   url=${ORC_BOARD_URL%/}/api/ingest
   extra=""
   if [ -n "${ORC_BYPASS:-}" ]; then
-    extra="-H x-vercel-protection-bypass: ${ORC_BYPASS}"
+    extra="x-vercel-protection-bypass: ${ORC_BYPASS}"
   fi
-  # shellcheck disable=SC2086
   curl -fsS -X POST "$url" \
     -H "Authorization: Bearer ${ORC_BOARD_SECRET}" \
     -H "content-type: application/json" \
-    $extra \
+    -H "${extra:-x-orc-noop: 1}" \
     --data-binary "$body"
   echo
 }

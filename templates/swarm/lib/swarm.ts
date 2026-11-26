@@ -1,6 +1,6 @@
 import type { Board, MessageView, ThreadSummaryView } from "@vercel/board";
 import { AGENTS, SWARM, NAME, RUNS, team } from "./board.ts";
-import { allHeartbeats, type Heartbeat } from "./heartbeat.ts";
+import { allHeartbeats, restoreHeartbeats, type Heartbeat } from "./heartbeat.ts";
 import {
   FALLBACK_AVATAR,
   ROSTER,
@@ -239,6 +239,9 @@ export async function snapshot(board: Board = team(), swarm: string = SWARM): Pr
   const [feed, agentFeed] = await Promise.all([board.poll({ channel: swarm, last: 100 }), board.poll({ channel: AGENTS, last: 100 })]);
   const posted = postedOf(feed.events);
   const agentPosted = postedOf(agentFeed.events);
+  restoreHeartbeats(
+    agentFeed.events.flatMap((event) => (event.message && !event.message.deleted ? [event.message] : [])),
+  );
   const [openRead, finishedRead] = await Promise.all([
     Promise.all(OPEN.map((state) => tasksIn(board, swarm, state, OPEN_LIMIT))),
     Promise.all(FINISHED.map((state) => tasksIn(board, swarm, state, FINISHED_LIMIT))),

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { board as makeBoard, type Board } from "@vercel/board";
 import { local } from "@vercel/board/backend-local";
 import { authorize, claimToken, ingest } from "../lib/ingest.ts";
-import { resetHeartbeats } from "../lib/heartbeat.ts";
+import { allHeartbeats, resetHeartbeats } from "../lib/heartbeat.ts";
 import { isProfileName } from "../lib/roster.ts";
 import { snapshot } from "../lib/swarm.ts";
 import { expireHeartbeats } from "../lib/tick.ts";
@@ -134,6 +134,31 @@ test("a snapshot still seeds idle tiles when nobody has heartbeated", async () =
   assert.ok(snap.agents.some((agent) => agent.id === "claude-troll" && agent.group === "claude"));
   assert.ok(snap.agents.some((agent) => agent.id === "codex-hub" && agent.machine === "mac"));
   assert.equal(snap.agents.filter((agent) => agent.group === "grok").length >= 15, true);
+});
+
+test("after a cold start, heartbeat status is rebuilt from agents/ labels", async () => {
+  resetHeartbeats();
+  const board = fresh();
+  await run(board, { action: "heartbeat", agent: "xorc", group: "grok", machine: "cloud", status: "working", task: "patch" });
+  resetHeartbeats();
+  assert.equal(allHeartbeats().length, 0);
+  const snap = await snapshot(board, "swarm/");
+  const tile = snap.agents.find((agent) => agent.id === "xorc");
+  assert.ok(tile);
+  assert.equal(tile!.status, "working");
+  assert.equal(tile!.taskTitle, "patch");
+  assert.equal(tile!.machine, "cloud");
+});
+
+test("cron after a cold start restores board heartbeats, then marks stale ones idle", async () => {
+  resetHeartbeats();
+  const board = fresh();
+  await run(board, { action: "heartbeat", agent: "videorc-main", group: "codex", machine: "mac", status: "working", task: "clock" });
+  resetHeartbeats();
+  const expired = await expireHeartbeats(board, Date.now() + 4 * 60_000);
+  assert.ok(expired.idle.includes("videorc-main"));
+  const snap = await snapshot(board, "swarm/");
+  assert.equal(snap.agents.find((agent) => agent.id === "videorc-main")?.status, "idle");
 });
 
 test("a claim token is 32 bytes in base64url, and the same agent and task always get the same one", () => {
